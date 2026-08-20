@@ -28,4 +28,7 @@ node tests/features.test.js
 # Run the worker protocol test (message contract, rejection handling).
 node tests/worker.test.js
 
+# Run the client API test (browser postMessage payload validity).
+node tests/client.test.js
+
 echo "All tests passed."

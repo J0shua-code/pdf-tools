@@ -305,7 +305,9 @@ export function mergePDFs(options) {
     activeJobs.set(id, { resolve, reject, onProgress });
 
     const w = ensureWorker();
-    const transferList = transfer === false ? undefined : files.map((f) => f.buffer);
+    // `files` are ArrayBuffers (already validated above); transfer them
+    // directly. (`.buffer` is only valid on typed-array views.)
+    const transferList = transfer === false ? undefined : files.slice();
     w.postMessage(
       {
         type: 'merge',
@@ -455,7 +457,7 @@ export function imagesToPdf(options) {
     activeJobs.set(id, { resolve, reject, onProgress });
 
     const w = ensureWorker();
-    const transferList = transfer === false ? undefined : images.map((f) => f.buffer);
+    const transferList = transfer === false ? undefined : images.slice();
     w.postMessage(
       {
         type: 'imagesToPdf',
