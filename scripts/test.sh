@@ -22,6 +22,9 @@ mkdir -p tests/output tests/temp
 # Run the Node-based integration test (C wrapper + presets).
 node tests/integration.test.js
 
+# Run the feature tests (Tests 2-7: pages, image/text, corrupt, sequential).
+node tests/features.test.js
+
 # Run the worker protocol test (message contract, rejection handling).
 node tests/worker.test.js
 

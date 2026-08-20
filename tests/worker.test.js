@@ -242,6 +242,33 @@ async function run() {
       assert(result.success === false, 'success should be false');
       assert(result.code === 'INVALID_FILE', 'code should be INVALID_FILE');
     });
+
+    await check('rejects a non-PDF payload by content (missing %PDF- header)', async () => {
+      const garbage = new TextEncoder().encode('this is not a pdf at all').buffer;
+      const { result } = await runJob(worker, {
+        type: 'compress',
+        id: 'job-notpdf',
+        file: garbage,
+        options: { preset: 'balanced' }
+      });
+
+      assert(result.success === false, 'success should be false');
+      assert(result.code === 'INVALID_PDF', 'code should be INVALID_PDF');
+    });
+
+    await check('processes three sequential jobs without leftover temp files', async () => {
+      for (let i = 0; i < 3; i++) {
+        const { result } = await runJob(worker, {
+          type: 'compress',
+          id: `job-seq-${i}`,
+          file: simple.buffer.slice(simple.byteOffset, simple.byteOffset + simple.byteLength),
+          options: { preset: ['extreme', 'balanced', 'highQuality'][i % 3] }
+        });
+
+        assert(result.success === true, `job ${i} should succeed`);
+        assert(isValidPdf(result.bytes), `job ${i} should produce a valid PDF`);
+      }
+    });
   } finally {
     worker.terminate();
   }

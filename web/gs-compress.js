@@ -36,6 +36,13 @@ function generateId() {
   return `job-${Date.now().toString(36)}-${(jobCounter++).toString(36)}`;
 }
 
+/** Reject files that do not begin with the PDF signature (%PDF-). */
+function hasPdfSignature(buffer) {
+  if (!(buffer instanceof ArrayBuffer)) return false;
+  const head = new Uint8Array(buffer, 0, Math.min(5, buffer.byteLength));
+  return String.fromCharCode(head[0], head[1], head[2], head[3], head[4]) === '%PDF-';
+}
+
 function createWorker() {
   const w = new Worker('./ghostscript.worker.js', { type: 'classic' });
 
@@ -106,6 +113,13 @@ function handleWorkerMessage(data) {
         err.code = data.code;
         err.gsCode = data.gsCode;
         job.reject(err);
+
+        // A Ghostscript failure can leave the interpreter in an
+        // unrecoverable state. Throw the worker away so the next call
+        // starts from a clean, freshly-created worker.
+        if (data.code === 'GHOSTSCRIPT_ERROR') {
+          terminateWorker();
+        }
       }
       return;
     }
@@ -161,6 +175,13 @@ export function compressPDF(options) {
   if (!file || !(file instanceof ArrayBuffer)) {
     return Promise.reject(
       Object.assign(new Error('compressPDF: file must be an ArrayBuffer'), { code: 'INVALID_FILE' })
+    );
+  }
+  if (!hasPdfSignature(file)) {
+    return Promise.reject(
+      Object.assign(new Error('compressPDF: the file is not a valid PDF (missing the %PDF- header)'), {
+        code: 'INVALID_PDF'
+      })
     );
   }
   if (!PRESET_META.some((p) => p.id === preset)) {

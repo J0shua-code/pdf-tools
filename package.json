@@ -21,7 +21,10 @@
     "clean": "bash scripts/clean.sh",
     "test": "bash scripts/test.sh",
     "benchmark": "node scripts/benchmark.js",
-    "serve": "node scripts/serve.js"
+    "sample": "node scripts/sample-compress.js",
+    "serve": "node scripts/serve.js",
+    "build:package": "npm --prefix packages/ghostscript-wasm install && npm --prefix packages/ghostscript-wasm run build",
+    "test:package": "node packages/ghostscript-wasm/test/package.test.js"
   },
   "keywords": [
     "ghostscript",
@@ -41,6 +44,6 @@
   "peerDependencies": {},
   "repository": {
     "type": "git",
-    "url": "https://github.com/example/ghostscript-wasm.git"
+    "url": "https://github.com/J0shua-code/pdf-tools.git"
   }
 }

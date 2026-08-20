@@ -104,9 +104,38 @@ function selectedPreset() {
 
 // ---- file selection ----------------------------------------------------------
 
-function handleFile(file) {
-  if (!file || file.type !== 'application/pdf') {
+/**
+ * Validate a PDF by its content, never by filename or MIME type alone
+ * (drag-and-drop files often have an empty MIME type, and a .pdf name can
+ * carry anything).
+ */
+async function isPdfByContent(file) {
+  try {
+    const head = new Uint8Array(await file.slice(0, 5).arrayBuffer());
+    return String.fromCharCode(head[0], head[1], head[2], head[3], head[4]) === '%PDF-';
+  } catch {
+    return false;
+  }
+}
+
+/** Keep only safe characters for the download filename. */
+function sanitizeFileName(name) {
+  return (name || 'document')
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .replace(/[\u0000-\u001f]/g, '')
+    .trim()
+    .replace(/\.pdf$/i, '')
+    .slice(0, 80) || 'document';
+}
+
+async function handleFile(file) {
+  if (!file) {
     setStatus('Please select a valid PDF file.', 'error');
+    return;
+  }
+
+  if (!(await isPdfByContent(file))) {
+    setStatus('The selected file is not a valid PDF (missing the %PDF- header).', 'error');
     return;
   }
 
@@ -188,7 +217,7 @@ async function onCompress() {
     savingsEl.textContent = `${savedPercent}%`;
     processingNoteEl.textContent = `Processed in ${result.processingTimeMs} ms.`;
     downloadLink.href = currentBlobUrl;
-    downloadLink.download = `compressed-${currentFile.name.replace(/\.pdf$/i, '')}.pdf`;
+    downloadLink.download = `compressed-${sanitizeFileName(currentFile.name)}.pdf`;
 
     showResult();
     setStatus('', 'success');

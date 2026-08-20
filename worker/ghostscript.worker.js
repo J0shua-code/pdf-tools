@@ -29,6 +29,10 @@
  *   compressionRatio:  0..1 fraction saved (1 - compressed/original)
  *   processingTimeMs:  number
  *   heapBytesAfter:    number (WASM heap size after the job, informational)
+ *
+ * Error codes: INVALID_FILE (bad payload), EMPTY_FILE, FILE_TOO_LARGE
+ *   (above the 256 MB safety limit), INVALID_PDF (missing %PDF- header),
+ *   INVALID_PRESET, GHOSTSCRIPT_ERROR (Ghostscript rejected the input).
  */
 
 importScripts('./ghostscript.js', './presets.js');
@@ -99,6 +103,23 @@ async function compress(module, file, options, id) {
       `This build can safely process files up to ${MAX_SAFE_INPUT_BYTES / 1024 / 1024} MB.`
     );
     err.code = 'FILE_TOO_LARGE';
+    throw err;
+  }
+
+  // Content validation: never trust the filename or MIME type. Reject
+  // anything that does not start with the PDF magic signature (%PDF-).
+  // This also catches HTML documents or scripts uploaded with a .pdf name.
+  const head = new Uint8Array(
+    file instanceof ArrayBuffer ? file : file.buffer,
+    file instanceof ArrayBuffer ? 0 : file.byteOffset,
+    Math.min(5, originalSize)
+  );
+  const magic = String.fromCharCode(head[0], head[1], head[2], head[3], head[4]);
+  if (magic !== '%PDF-') {
+    const err = new Error(
+      'The selected file is not a valid PDF (missing the %PDF- header).'
+    );
+    err.code = 'INVALID_PDF';
     throw err;
   }
 

@@ -178,8 +178,8 @@ worker.postMessage(
 //   { type: 'result', id, success: false, code, error }
 ```
 
-Error codes: `INVALID_FILE`, `EMPTY_FILE`, `FILE_TOO_LARGE`, `INVALID_PRESET`,
-`GHOSTSCRIPT_ERROR`.
+Error codes: `INVALID_FILE`, `EMPTY_FILE`, `FILE_TOO_LARGE`, `INVALID_PDF`
+(missing `%PDF-` header), `INVALID_PRESET`, `GHOSTSCRIPT_ERROR`.
 
 ### Safety limits
 
@@ -190,6 +190,34 @@ Error codes: `INVALID_FILE`, `EMPTY_FILE`, `FILE_TOO_LARGE`, `INVALID_PRESET`,
   worker posts `recycle`; the client terminates it and a fresh one is
   created on the next call.
 - `INITIAL_MEMORY` is 64 MB; the heap grows on demand up to 512 MB.
+
+## Package (`@project/ghostscript-wasm`)
+
+A publishable TypeScript package (`packages/ghostscript-wasm`) wraps the
+engine with a single clean API. Consumers never see Emscripten, the WASM
+filesystem, Ghostscript argv or the worker lifecycle.
+
+```ts
+import { compressPdf } from "@project/ghostscript-wasm";
+
+const result = await compressPdf(file, {
+  preset: "balanced",
+  onProgress(event) {
+    console.log(event.stage);
+  }
+});
+
+const blob = new Blob([result.bytes], { type: "application/pdf" });
+```
+
+Build it from the repo root (after building the WASM engine):
+
+```bash
+npm run build:package   # npm install + tsc + copy runtime assets
+npm run test:package    # runs the package's own end-to-end test
+```
+
+See `packages/ghostscript-wasm/README.md` for the full API.
 
 ## Integration with Next.js
 
@@ -282,15 +310,16 @@ ghostscript-wasm/
 ├── package.json
 ├── Dockerfile
 ├── docker-compose.yml
-├── scripts/          Build, test, benchmark and dev-server scripts
+├── scripts/          Build, test, benchmark, sample-compression and dev-server scripts
 ├── patches/          Source patches for Emscripten compatibility
 ├── native/           C wrapper around libgs (gs_process_pdf_argv, gs_run, …)
 ├── shared/           Preset definitions (single source of truth)
 ├── worker/           Web Worker loader + message protocol
 ├── web/              Demo HTML/JS/CSS + client API (gs-compress.js)
-├── tests/            Input PDFs, integration test, worker protocol test
+├── packages/         @project/ghostscript-wasm (TypeScript package)
+├── tests/            Input PDFs + integration / feature / worker protocol tests
 ├── dist/             Generated WASM artifacts
-└── .github/workflows CI/CD
+└── .github/workflows Build + release-check CI/CD
 ```
 
 ## Tests & benchmark
@@ -298,13 +327,22 @@ ghostscript-wasm/
 - `tests/integration.test.js` — loads the WASM module and compresses each
   test PDF with every preset through the C wrapper, asserting valid output
   and sane ratios.
+- `tests/features.test.js` — the acceptance tests: multi-page PDFs keep
+  their page count; image-heavy PDFs come out smaller; text-heavy PDFs stay
+  readable (text is extracted with the `txtwrite` device and compared);
+  corrupt input yields a controlled error, never a crash; and three
+  sequential jobs leave no temporary files in the WASM filesystem.
 - `tests/worker.test.js` — runs the real worker file inside a Node
   `worker_thread` shim and checks the message contract: ready, progress
   stages, success results, and graceful rejection of unknown preset / empty
-  file / over-limit file / non-buffer payloads.
+  file / over-limit file / non-PDF / non-buffer payloads.
+- `packages/ghostscript-wasm/test/package.test.js` — exercises the public
+  package API end to end (progress events, invalid inputs, `dispose()`).
 - `scripts/benchmark.js` — records size, compression %, time, page-count
   preservation and a visual-quality proxy (renders page 1 to PNG at 150 DPI
   via `gs_run`) for every input × preset.
+- `scripts/sample-compress.js` — compresses one PDF through the real worker
+  pipeline; used by CI as an end-to-end smoke test.
 
 Current reference numbers (mozilla/pdf.js corpus, see `tests/input/README.md`):
 
@@ -315,6 +353,26 @@ Current reference numbers (mozilla/pdf.js corpus, see `tests/input/README.md`):
 | large.pdf     | 86.9%   | 86.9%    | 86.1%       |
 
 All outputs preserve the page count and render at ~100% of the original.
+
+## Security (PDFs are untrusted input)
+
+- **No JS execution** — JavaScript embedded in a PDF is never executed.
+  Ghostscript runs as WASM inside a sandboxed worker with `-dSAFER`; the
+  browser application has no PDF-JS interpreter.
+- **Closed argument surface** — the public API accepts only a preset
+  *name*. Ghostscript arguments are fixed in `shared/presets.js`; arbitrary
+  command-line arguments can never be supplied by application code, and
+  the `gs_run` dev entry point is never exposed through the worker.
+- **Content validation** — input is validated by its `%PDF-` signature
+  (`INVALID_PDF`), never by filename, MIME type alone, or metadata.
+- **Unique temp paths** — every job writes to a fresh `/work/job-<id>`
+  directory and removes it in a `finally` block, so temporary files do not
+  accumulate.
+- **Crash recovery** — a worker crash rejects all pending jobs and the
+  worker is terminated; a Ghostscript failure also restarts the worker
+  because the interpreter may be in an unrecoverable state. The next call
+  lazily creates a fresh worker.
+- **Size guard** — inputs over 256 MB are rejected before processing.
 
 ## Versioning
 

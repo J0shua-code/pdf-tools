@@ -90,3 +90,61 @@ export function countPages(bytes) {
   while ((m = re.exec(s)) !== null) n++;
   return n;
 }
+
+/**
+ * Extract the text of a PDF via Ghostscript's txtwrite device.
+ * Returns the raw extracted text, or null if extraction failed.
+ * Dev-only helper (uses gs_run, which the web worker never exposes).
+ */
+export async function extractText(module, inputBytes) {
+  const jobId = Math.random().toString(36).slice(2);
+  const workDir = `/work/text-${jobId}`;
+  const inPath = `${workDir}/in.pdf`;
+  const txtPath = `${workDir}/out.txt`;
+  const FS = module.FS;
+
+  try {
+    FS.mkdirTree(workDir);
+    FS.writeFile(inPath, inputBytes);
+
+    const run = module.cwrap('gs_run', 'number', ['string', 'string', 'string']);
+    const args = [
+      '-dNOPAUSE',
+      '-dBATCH',
+      '-sDEVICE=txtwrite',
+      '-dFirstPage=1',
+      '-dLastPage=1000'
+    ].join('\n');
+
+    const code = run(inPath, txtPath, args);
+    if (code !== 0) return null;
+    return Buffer.from(FS.readFile(txtPath)).toString('utf8');
+  } finally {
+    try { FS.unlink(inPath); } catch (e) { /* ignore */ }
+    try { FS.unlink(txtPath); } catch (e) { /* ignore */ }
+    try { FS.rmdir(workDir); } catch (e) { /* ignore */ }
+  }
+}
+
+/** Split text into normalized lowercase words for similarity comparison. */
+export function tokenize(text) {
+  return (text || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+/**
+ * Fraction of `a`'s tokens that also appear in `b` (0..1).
+ */
+export function tokenContainment(a, b) {
+  const tokensA = tokenize(a);
+  const setB = new Set(tokenize(b));
+  if (tokensA.length === 0) return 0;
+  let present = 0;
+  for (const t of tokensA) {
+    if (setB.has(t)) present++;
+  }
+  return present / tokensA.length;
+}
