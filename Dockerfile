@@ -7,31 +7,32 @@ FROM emscripten/emsdk:${EMSCRIPTEN_VERSION}
 LABEL org.opencontainers.image.title="Ghostscript WASM Builder"
 LABEL org.opencontainers.image.description="Reproducible Ghostscript WASM build environment"
 
-# Install Ghostscript build dependencies. Versions are pinned to the
-# Debian release shipped with the emscripten/emsdk image for this
-# Emscripten version; update them when changing EMSCRIPTEN_VERSION.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential=12.9 \
-    autoconf=2.71-3 \
-    automake=1:1.16.5-1.3 \
-    libtool=2.4.7-7 \
-    cmake=3.25.1-1 \
-    pkg-config=1.8.1-1 \
-    git=1:2.39.5-0+deb12u2 \
-    curl=7.88.1-10+deb12u9 \
-    unzip=6.0-28 \
-    wget=1.21.3-1+deb12u1 \
-    ca-certificates=20230311 \
-    python3=3.11.2-1+b1 \
-    python3-distutils=3.11.2-3 \
-    libtiff-dev=4.5.0-6+deb12u2 \
-    libjpeg62-turbo-dev=1:2.1.5-2 \
-    libpng-dev=1.6.39-2 \
-    libfreetype6-dev=2.12.1+dfsg-5+deb12u3 \
-    libfontconfig1-dev=2.14.1-4 \
-    liblcms2-dev=2.14-2 \
-    libopenjp2-7-dev=2.5.0-2 \
-    zlib1g-dev=1:1.2.13.dfsg-1 \
+# Install Ghostscript build dependencies. The emscripten/emsdk image is
+# based on Ubuntu 24.04 (noble), so Debian-pinned versions do not apply;
+# versions are intentionally unpinned to match whatever the base image
+# ships. Python is already provided by the emsdk base image (its own
+# toolchain also bundles a Python), so it is not installed here.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    build-essential \
+    autoconf \
+    automake \
+    libtool \
+    cmake \
+    pkg-config \
+    git \
+    curl \
+    unzip \
+    wget \
+    ca-certificates \
+    patch \
+    libtiff-dev \
+    libjpeg62-turbo-dev \
+    libpng-dev \
+    libfreetype6-dev \
+    libfontconfig1-dev \
+    liblcms2-dev \
+    libopenjp2-7-dev \
+    zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Derive the bundled Node.js path from the emsdk image rather than
