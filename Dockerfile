@@ -26,7 +26,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     ca-certificates \
     patch \
     libtiff-dev \
-    libjpeg62-turbo-dev \
+    libjpeg-turbo8-dev \
     libpng-dev \
     libfreetype6-dev \
     libfontconfig1-dev \
