@@ -138,6 +138,10 @@ function assert(condition, message) {
 
 let failures = 0;
 
+function toArrayBuffer(buf) {
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+}
+
 async function check(name, fn) {
   try {
     await fn();
@@ -268,6 +272,188 @@ async function run() {
         assert(result.success === true, `job ${i} should succeed`);
         assert(isValidPdf(result.bytes), `job ${i} should produce a valid PDF`);
       }
+    });
+
+    await check('merges multiple PDFs into one valid PDF', async () => {
+      const toArrayBuffer = (buf) =>
+        buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+      const images = await fs.readFile(path.join(INPUT_DIR, 'images.pdf'));
+
+      const { result, stages } = await runJob(worker, {
+        type: 'merge',
+        id: 'job-merge',
+        files: [toArrayBuffer(simple), toArrayBuffer(images)],
+        options: {}
+      });
+
+      assert(result.success === true, 'success should be true');
+      assert(isValidPdf(result.bytes), 'bytes should be a valid PDF');
+      assert(result.fileCount === 2, 'fileCount should be 2');
+      assert(
+        result.originalSize === simple.length + images.length,
+        'originalSize should be the sum of the inputs'
+      );
+      assert(result.compressedSize === result.bytes.length, 'compressedSize mismatch');
+      assert(
+        typeof result.processingTimeMs === 'number' && result.processingTimeMs >= 0,
+        'processingTimeMs should be a non-negative number'
+      );
+      assert(stages.includes('processing'), 'should include processing stage');
+      assert(stages[stages.length - 1] === 'complete', 'last stage should be "complete"');
+    });
+
+    await check('rejects a merge with fewer than two files gracefully', async () => {
+      const toArrayBuffer = (buf) =>
+        buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+
+      const { result } = await runJob(worker, {
+        type: 'merge',
+        id: 'job-merge-one',
+        files: [toArrayBuffer(simple)],
+        options: {}
+      });
+
+      assert(result.success === false, 'success should be false');
+      assert(result.code === 'INVALID_FILE', 'code should be INVALID_FILE');
+    });
+
+    await check('rejects a merge containing a non-PDF file gracefully', async () => {
+      const garbage = new TextEncoder().encode('this is not a pdf at all').buffer;
+
+      const { result } = await runJob(worker, {
+        type: 'merge',
+        id: 'job-merge-notpdf',
+        files: [toArrayBuffer(simple), garbage],
+        options: {}
+      });
+
+      assert(result.success === false, 'success should be false');
+      assert(result.code === 'INVALID_PDF', 'code should be INVALID_PDF');
+    });
+
+    await check('merges PDFs onto a fixed page size (A4 + fit)', async () => {
+      const images = await fs.readFile(path.join(INPUT_DIR, 'images.pdf'));
+
+      const { result } = await runJob(worker, {
+        type: 'merge',
+        id: 'job-merge-a4',
+        files: [toArrayBuffer(simple), toArrayBuffer(images)],
+        options: { pageSize: 'a4', fit: true }
+      });
+
+      assert(result.success === true, 'success should be true');
+      assert(isValidPdf(result.bytes), 'bytes should be a valid PDF');
+      assert(result.fileCount === 2, 'fileCount should be 2');
+    });
+
+    await check('rejects a merge with an unknown page size gracefully', async () => {
+      const images = await fs.readFile(path.join(INPUT_DIR, 'images.pdf'));
+
+      const { result } = await runJob(worker, {
+        type: 'merge',
+        id: 'job-merge-badps',
+        files: [toArrayBuffer(simple), toArrayBuffer(images)],
+        options: { pageSize: 'tall', fit: true }
+      });
+
+      assert(result.success === false, 'success should be false');
+      assert(result.code === 'INVALID_PAGE_SIZE', 'code should be INVALID_PAGE_SIZE');
+    });
+
+    await check('renders a PDF to PNG images', async () => {
+      const { result } = await runJob(worker, {
+        type: 'toImages',
+        id: 'job-toimages',
+        file: toArrayBuffer(simple),
+        options: { format: 'png', dpi: 150 }
+      });
+
+      assert(result.success === true, 'success should be true');
+      assert(result.count === 1, 'expected 1 image');
+      assert(Array.isArray(result.images) && result.images.length === 1, 'images array');
+      assert(result.images[0].name.endsWith('.png'), 'image filename should end in .png');
+      const png = result.images[0].bytes;
+      assert(
+        String.fromCharCode(png[0], png[1], png[2], png[3]) === '\x89PNG',
+        'output should be a PNG (magic bytes)'
+      );
+      assert(
+        typeof result.processingTimeMs === 'number' && result.processingTimeMs >= 0,
+        'processingTimeMs should be a non-negative number'
+      );
+    });
+
+    await check('rejects PDF -> image with an unknown dpi gracefully', async () => {
+      const { result } = await runJob(worker, {
+        type: 'toImages',
+        id: 'job-baddpi',
+        file: toArrayBuffer(simple),
+        options: { format: 'png', dpi: 999 }
+      });
+
+      assert(result.success === false, 'success should be false');
+      assert(result.code === 'INVALID_DPI', 'code should be INVALID_DPI');
+    });
+
+    await check('rejects PDF -> image with an unknown format gracefully', async () => {
+      const { result } = await runJob(worker, {
+        type: 'toImages',
+        id: 'job-badfmt',
+        file: toArrayBuffer(simple),
+        options: { format: 'gif', dpi: 150 }
+      });
+
+      assert(result.success === false, 'success should be false');
+      assert(result.code === 'INVALID_FORMAT', 'code should be INVALID_FORMAT');
+    });
+
+    await check('converts a JPEG image to a PDF', async () => {
+      // Produce a real JPEG via the worker (render simple.pdf page 1).
+      const jpegJob = await runJob(worker, {
+        type: 'toImages',
+        id: 'job-jpeg-src',
+        file: toArrayBuffer(simple),
+        options: { format: 'jpeg', dpi: 150 }
+      });
+      assert(jpegJob.result.success === true && jpegJob.result.count === 1, 'jpeg source');
+      const jpeg = jpegJob.result.images[0].bytes;
+
+      const { result, stages } = await runJob(worker, {
+        type: 'imagesToPdf',
+        id: 'job-img2pdf',
+        images: [toArrayBuffer(jpeg)],
+        options: { pageSize: 'a4', fit: true }
+      });
+
+      assert(result.success === true, 'success should be true');
+      assert(isValidPdf(result.bytes), 'bytes should be a valid PDF');
+      assert(result.fileCount === 1, 'fileCount should be 1');
+      assert(stages.includes('processing'), 'should include a processing stage');
+      assert(stages[stages.length - 1] === 'complete', 'last stage should be "complete"');
+    });
+
+    await check('rejects imagesToPdf with no images gracefully', async () => {
+      const { result } = await runJob(worker, {
+        type: 'imagesToPdf',
+        id: 'job-img2pdf-empty',
+        images: [],
+        options: {}
+      });
+
+      assert(result.success === false, 'success should be false');
+      assert(result.code === 'INVALID_FILE', 'code should be INVALID_FILE');
+    });
+
+    await check('rejects imagesToPdf with an unknown page size gracefully', async () => {
+      const { result } = await runJob(worker, {
+        type: 'imagesToPdf',
+        id: 'job-img2pdf-badps',
+        images: [toArrayBuffer(simple)],
+        options: { pageSize: 'postcard' }
+      });
+
+      assert(result.success === false, 'success should be false');
+      assert(result.code === 'INVALID_PAGE_SIZE', 'code should be INVALID_PAGE_SIZE');
     });
   } finally {
     worker.terminate();

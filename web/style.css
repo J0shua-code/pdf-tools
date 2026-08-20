@@ -50,6 +50,46 @@ h1 {
   display: none !important;
 }
 
+/* ---- mode toggle --------------------------------------------------------- */
+
+.mode-toggle {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.4rem;
+  padding: 0.3rem;
+  margin-bottom: 1.25rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+}
+
+@media (max-width: 560px) {
+  .mode-toggle {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.mode-btn {
+  padding: 0.6rem 1rem;
+  border: none;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.mode-btn:hover {
+  color: var(--text);
+}
+
+.mode-btn.active {
+  background: var(--accent);
+  color: #0f172a;
+}
+
 /* ---- drop zone ---------------------------------------------------------- */
 
 .drop-zone {
@@ -99,6 +139,89 @@ h1 {
   font-size: 0.9rem;
 }
 
+/* ---- file list (merge) ---------------------------------------------------- */
+
+.file-list {
+  margin-top: 1rem;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.file-list-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  background: rgba(56, 189, 248, 0.06);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+
+.file-list-row:last-child {
+  border-bottom: none;
+}
+
+.file-list-row.dragging {
+  opacity: 0.4;
+}
+
+.file-list-row.drop-target {
+  box-shadow: inset 0 2px 0 0 var(--accent);
+}
+
+.file-list-grip {
+  flex-shrink: 0;
+  color: var(--muted);
+  cursor: grab;
+  user-select: none;
+}
+
+.file-list-remove {
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--error);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.file-list-remove:hover {
+  background: var(--error);
+  color: #0f172a;
+}
+
+.file-list-idx {
+  flex-shrink: 0;
+  width: 1.6rem;
+  height: 1.6rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #0f172a;
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+
+.file-list-name {
+  flex: 1;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.file-list-size {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 /* ---- presets ------------------------------------------------------------ */
 
 .controls {
@@ -146,6 +269,42 @@ h1 {
 
 .preset-option small {
   color: var(--muted);
+}
+
+/* ---- generic controls (page size / format selects) ------------------------ */
+
+.control-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+}
+
+.control-row select {
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.45rem;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.control-row .check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.control-row .check input {
+  accent-color: var(--accent);
+}
+
+.control-hint {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
 }
 
 /* ---- button ------------------------------------------------------------- */
@@ -276,6 +435,53 @@ h1 {
 
 .download-link:hover {
   filter: brightness(1.08);
+}
+
+.download-link.alt {
+  background: var(--accent);
+}
+
+.result-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* ---- image result grid (PDF -> Image) ------------------------------------- */
+
+.image-grid {
+  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 0.6rem;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.image-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg);
+  text-decoration: none;
+  color: var(--text);
+  font-size: 0.75rem;
+  word-break: break-all;
+}
+
+.image-cell:hover {
+  border-color: var(--accent);
+}
+
+.image-cell img {
+  width: 100%;
+  height: auto;
+  border-radius: 0.3rem;
+  background: #fff;
 }
 
 /* ---- footer ------------------------------------------------------------- */

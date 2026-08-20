@@ -1,12 +1,22 @@
 /*
- * Demo UI for the Ghostscript WASM PDF compressor (Phase 13).
+ * Demo UI for the Ghostscript WASM PDF tools (compress, merge, PDF -> image,
+ * image -> PDF).
  *
- * The Ghostscript engine is loaded lazily: the worker is only created
- * when the user clicks "Compress PDF" (see gs-compress.js), so the WASM
- * is never downloaded on page load.
+ * The Ghostscript engine is loaded lazily: the worker is only created when
+ * the user runs a job (see gs-compress.js), so the WASM is never downloaded
+ * on page load.
  */
 
-import { compressPDF, PRESET_META } from './gs-compress.js';
+import {
+  compressPDF,
+  mergePDFs,
+  pdfToImages,
+  imagesToPdf,
+  PRESET_META,
+  PAGE_SIZE_META,
+  IMAGE_FORMAT_META,
+  IMAGE_DPI_META
+} from './gs-compress.js';
 
 const fileInput = document.getElementById('file-input');
 const dropZone = document.getElementById('drop-zone');
@@ -14,22 +24,74 @@ const dropText = document.getElementById('drop-text');
 const fileInfo = document.getElementById('file-info');
 const fileNameEl = document.getElementById('file-name');
 const fileSizeEl = document.getElementById('file-size');
+const fileList = document.getElementById('file-list');
 const presetGroup = document.getElementById('preset-group');
+const mergeOptions = document.getElementById('merge-options');
+const imageOptions = document.getElementById('image-options');
+const imagepdfOptions = document.getElementById('imagepdf-options');
+const mergePageSize = document.getElementById('merge-page-size');
+const mergeFit = document.getElementById('merge-fit');
+const imageFormat = document.getElementById('image-format');
+const imageDpi = document.getElementById('image-dpi');
+const imagepdfPageSize = document.getElementById('imagepdf-page-size');
+const imagepdfFit = document.getElementById('imagepdf-fit');
+const modeCompress = document.getElementById('mode-compress');
+const modeMerge = document.getElementById('mode-merge');
+const modePdf2Image = document.getElementById('mode-pdf2image');
+const modeImage2Pdf = document.getElementById('mode-image2pdf');
 const compressBtn = document.getElementById('compress-btn');
 const progressEl = document.getElementById('progress');
 const progressText = document.getElementById('progress-text');
 const statusEl = document.getElementById('status');
 const resultEl = document.getElementById('result');
+const resultTitle = document.getElementById('result-title');
 const originalSizeEl = document.getElementById('original-size');
 const compressedSizeEl = document.getElementById('compressed-size');
 const savingsEl = document.getElementById('savings');
 const processingNoteEl = document.getElementById('processing-note');
+const resultOutputLabel = document.getElementById('result-output-label');
+const resultSavedLabel = document.getElementById('result-saved-label');
+const imageGrid = document.getElementById('image-grid');
 const downloadLink = document.getElementById('download-link');
+const zipLink = document.getElementById('zip-link');
 
 const PRESET_IDS = PRESET_META.map((p) => p.id);
 
+const MODE_UI = {
+  compress: {
+    buttonText: 'Compress PDF',
+    dropText: 'Select a PDF, or drag it here',
+    status: 'Select a PDF to begin.',
+    accept: 'application/pdf',
+    multiple: false
+  },
+  merge: {
+    buttonText: 'Merge PDFs',
+    dropText: 'Select PDFs, or drag them here',
+    status: 'Select at least two PDFs to merge.',
+    accept: 'application/pdf',
+    multiple: true
+  },
+  pdf2image: {
+    buttonText: 'Convert to Images',
+    dropText: 'Select a PDF, or drag it here',
+    status: 'Select a PDF to convert to images.',
+    accept: 'application/pdf',
+    multiple: false
+  },
+  image2pdf: {
+    buttonText: 'Create PDF',
+    dropText: 'Select images, or drag them here',
+    status: 'Select at least one image to convert to PDF.',
+    accept: 'image/*',
+    multiple: true
+  }
+};
+
+let mode = 'compress';
 let currentFile = null;
-let currentBlobUrl = null;
+let mergeFiles = [];
+let currentBlobUrls = [];
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -57,18 +119,78 @@ function showResult() {
 
 function hideResult() {
   resultEl.classList.add('hidden');
-  revokeBlobUrl();
+  revokeBlobUrls();
 }
 
-function revokeBlobUrl() {
-  if (currentBlobUrl) {
-    URL.revokeObjectURL(currentBlobUrl);
-    currentBlobUrl = null;
-    downloadLink.removeAttribute('href');
+function revokeBlobUrls() {
+  for (const url of currentBlobUrls) {
+    URL.revokeObjectURL(url);
   }
+  currentBlobUrls = [];
+  downloadLink.removeAttribute('href');
+  zipLink.removeAttribute('href');
 }
 
-// ---- preset radios ----------------------------------------------------------
+// ---- mode toggle -----------------------------------------------------------
+
+function setMode(next) {
+  mode = next;
+  const ui = MODE_UI[mode];
+
+  modeCompress.classList.toggle('active', mode === 'compress');
+  modeMerge.classList.toggle('active', mode === 'merge');
+  modePdf2Image.classList.toggle('active', mode === 'pdf2image');
+  modeImage2Pdf.classList.toggle('active', mode === 'image2pdf');
+  modeCompress.setAttribute('aria-selected', String(mode === 'compress'));
+  modeMerge.setAttribute('aria-selected', String(mode === 'merge'));
+  modePdf2Image.setAttribute('aria-selected', String(mode === 'pdf2image'));
+  modeImage2Pdf.setAttribute('aria-selected', String(mode === 'image2pdf'));
+
+  fileInput.multiple = ui.multiple;
+  fileInput.accept = ui.accept;
+  dropText.textContent = ui.dropText;
+
+  presetGroup.classList.toggle('hidden', mode !== 'compress');
+  mergeOptions.classList.toggle('hidden', mode !== 'merge');
+  imageOptions.classList.toggle('hidden', mode !== 'pdf2image');
+  imagepdfOptions.classList.toggle('hidden', mode !== 'image2pdf');
+
+  // Reset any selection from the previous mode.
+  currentFile = null;
+  mergeFiles = [];
+  fileInput.value = '';
+  fileInfo.classList.add('hidden');
+  fileList.classList.add('hidden');
+  fileList.textContent = '';
+  compressBtn.disabled = true;
+  compressBtn.textContent = ui.buttonText;
+  hideResult();
+  setStatus(ui.status);
+}
+
+// ---- option lists ----------------------------------------------------------
+
+function fillSelect(select, options, defaultValue) {
+  select.textContent = '';
+  for (const opt of options) {
+    const option = document.createElement('option');
+    option.value = String(opt.id);
+    option.textContent = opt.label;
+    select.appendChild(option);
+  }
+  select.value = String(defaultValue);
+}
+
+function renderOptions() {
+  fillSelect(mergePageSize, PAGE_SIZE_META, 'auto');
+  fillSelect(imagepdfPageSize, PAGE_SIZE_META, 'a4');
+  fillSelect(imageFormat, IMAGE_FORMAT_META, 'png');
+  fillSelect(imageDpi, IMAGE_DPI_META, 150);
+}
+
+function selectedPageSize(select) {
+  return select.value || 'auto';
+}
 
 function renderPresets() {
   for (const preset of PRESET_META) {
@@ -128,28 +250,145 @@ function sanitizeFileName(name) {
     .slice(0, 80) || 'document';
 }
 
-async function handleFile(file) {
-  if (!file) {
-    setStatus('Please select a valid PDF file.', 'error');
-    return;
-  }
+let dragIndex = null;
 
-  if (!(await isPdfByContent(file))) {
-    setStatus('The selected file is not a valid PDF (missing the %PDF- header).', 'error');
-    return;
-  }
+function renderList() {
+  fileList.classList.toggle('hidden', mergeFiles.length === 0);
+  fileList.textContent = '';
+  mergeFiles.forEach((file, i) => {
+    const row = document.createElement('div');
+    row.className = 'file-list-row';
+    row.draggable = true;
+    row.dataset.index = String(i);
 
-  currentFile = file;
-  fileNameEl.textContent = file.name;
-  fileSizeEl.textContent = formatBytes(file.size);
-  fileInfo.classList.remove('hidden');
-  dropText.textContent = 'Change PDF';
-  compressBtn.disabled = false;
-  hideResult();
-  setStatus('PDF ready. Choose a preset and click "Compress PDF".');
+    const idx = document.createElement('span');
+    idx.className = 'file-list-idx';
+    idx.textContent = `${i + 1}`;
+
+    const grip = document.createElement('span');
+    grip.className = 'file-list-grip';
+    grip.textContent = '⠿';
+    grip.title = 'Drag to reorder';
+
+    const name = document.createElement('span');
+    name.className = 'file-list-name';
+    name.textContent = file.name;
+
+    const size = document.createElement('span');
+    size.className = 'file-list-size';
+    size.textContent = formatBytes(file.size);
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'file-list-remove';
+    remove.textContent = '×';
+    remove.title = 'Remove';
+    remove.setAttribute('aria-label', `Remove ${file.name}`);
+    remove.addEventListener('click', () => {
+      mergeFiles.splice(i, 1);
+      renderList();
+      compressBtn.disabled = mergeFiles.length < (mode === 'merge' ? 2 : 1);
+    });
+
+    row.appendChild(idx);
+    row.appendChild(grip);
+    row.appendChild(name);
+    row.appendChild(size);
+    row.appendChild(remove);
+
+    row.addEventListener('dragstart', (e) => {
+      dragIndex = i;
+      row.classList.add('dragging');
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+    });
+    row.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      row.classList.add('drop-target');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drop-target'));
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const from = dragIndex;
+      const to = i;
+      if (from !== null && from !== undefined && from !== to) {
+        const [moved] = mergeFiles.splice(from, 1);
+        mergeFiles.splice(to, 0, moved);
+      }
+      renderList();
+    });
+    row.addEventListener('dragend', () => {
+      dragIndex = null;
+      renderList();
+    });
+
+    fileList.appendChild(row);
+  });
 }
 
-fileInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
+async function handleFiles(files) {
+  if (!files || files.length === 0) {
+    setStatus('Please select a file.', 'error');
+    return;
+  }
+
+  if (mode === 'compress' || mode === 'pdf2image') {
+    const file = files[0];
+    if (!(await isPdfByContent(file))) {
+      setStatus('The selected file is not a valid PDF (missing the %PDF- header).', 'error');
+      return;
+    }
+
+    currentFile = file;
+    fileNameEl.textContent = file.name;
+    fileSizeEl.textContent = formatBytes(file.size);
+    fileInfo.classList.remove('hidden');
+    dropText.textContent = 'Change PDF';
+    compressBtn.disabled = false;
+    hideResult();
+    setStatus(
+      mode === 'compress'
+        ? 'PDF ready. Choose a preset and click "Compress PDF".'
+        : 'PDF ready. Choose a format and click "Convert to Images".'
+    );
+    return;
+  }
+
+  // Multi-file modes: merge (PDFs) and image -> PDF (any images).
+  let valid = [];
+  if (mode === 'merge') {
+    for (const file of files) {
+      if (await isPdfByContent(file)) {
+        valid.push(file);
+      } else {
+        setStatus(`Skipped "${file.name}": not a valid PDF.`, 'error');
+      }
+    }
+  } else {
+    valid = Array.from(files);
+  }
+
+  if (valid.length === 0) {
+    setStatus(
+      mode === 'merge' ? 'No valid PDFs selected.' : 'No images selected.',
+      'error'
+    );
+    return;
+  }
+
+  mergeFiles = valid;
+  renderList();
+  compressBtn.disabled = mergeFiles.length < (mode === 'merge' ? 2 : 1);
+  hideResult();
+  setStatus(
+    mode === 'merge'
+      ? mergeFiles.length < 2
+        ? 'Add at least one more PDF to merge.'
+        : `Ready to merge ${mergeFiles.length} PDFs.`
+      : `Ready to create a ${mergeFiles.length}-page PDF.`
+  );
+}
+
+fileInput.addEventListener('change', (e) => handleFiles(Array.from(e.target.files)));
 
 dropZone.addEventListener('click', () => fileInput.click());
 dropZone.addEventListener('keydown', (e) => {
@@ -171,28 +410,178 @@ dropZone.addEventListener('dragleave', () => {
 dropZone.addEventListener('drop', (e) => {
   e.preventDefault();
   dropZone.classList.remove('dragover');
-  handleFile(e.dataTransfer.files[0]);
+  handleFiles(Array.from(e.dataTransfer.files));
 });
 
-// ---- compression ---------------------------------------------------------------
+modeCompress.addEventListener('click', () => setMode('compress'));
+modeMerge.addEventListener('click', () => setMode('merge'));
+modePdf2Image.addEventListener('click', () => setMode('pdf2image'));
+modeImage2Pdf.addEventListener('click', () => setMode('image2pdf'));
+
+// ---- ZIP writer (store method, no compression) ------------------------------
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) {
+    crc = CRC_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+/** Build a minimal ZIP (stored entries, no compression) from named byte arrays. */
+function buildZip(entries) {
+  const enc = new TextEncoder();
+  const chunks = [];
+  const central = [];
+  let offset = 0;
+
+  for (const { name, bytes } of entries) {
+    const nameBytes = enc.encode(name);
+    const crc = crc32(bytes);
+    const local = new Uint8Array(30);
+    const dv = new DataView(local.buffer);
+    dv.setUint32(0, 0x04034b50, true);
+    dv.setUint16(4, 20, true);
+    dv.setUint16(6, 0x0800, true); // UTF-8 file names
+    dv.setUint16(8, 0, true);      // method: store
+    dv.setUint32(14, crc, true);
+    dv.setUint32(18, bytes.length, true);
+    dv.setUint32(22, bytes.length, true);
+    dv.setUint16(26, nameBytes.length, true);
+    chunks.push(local, nameBytes, bytes);
+    central.push({ nameBytes, crc, size: bytes.length, offset });
+    offset += 30 + nameBytes.length + bytes.length;
+  }
+
+  const cdStart = offset;
+  const centralChunks = [];
+  for (const c of central) {
+    const rec = new Uint8Array(46);
+    const dv = new DataView(rec.buffer);
+    dv.setUint32(0, 0x02014b50, true);
+    dv.setUint16(4, 20, true);
+    dv.setUint16(6, 20, true);
+    dv.setUint16(8, 0x0800, true);
+    dv.setUint16(10, 0, true);
+    dv.setUint32(16, c.crc, true);
+    dv.setUint32(20, c.size, true);
+    dv.setUint32(24, c.size, true);
+    dv.setUint16(28, c.nameBytes.length, true);
+    dv.setUint32(42, c.offset, true);
+    centralChunks.push(rec, c.nameBytes);
+  }
+  const cdSize = centralChunks.reduce((s, ch) => s + ch.length, 0);
+
+  const end = new Uint8Array(22);
+  const dvEnd = new DataView(end.buffer);
+  dvEnd.setUint32(0, 0x06054b50, true);
+  dvEnd.setUint16(8, entries.length, true);
+  dvEnd.setUint16(10, entries.length, true);
+  dvEnd.setUint32(12, cdSize, true);
+  dvEnd.setUint32(16, cdStart, true);
+
+  return new Blob([...chunks, ...centralChunks, end], { type: 'application/zip' });
+}
+
+// ---- processing ---------------------------------------------------------------
 
 const STAGE_MESSAGES = {
   loading: 'Loading Ghostscript engine…',
   initializing: 'Initializing Ghostscript…',
-  'writing-input': 'Writing input PDF…',
-  processing: 'Processing PDF…',
+  'writing-input': 'Writing input…',
+  processing: 'Processing…',
   'reading-output': 'Finalizing output…',
   complete: 'Complete.'
 };
 
-async function onCompress() {
-  if (!currentFile) return;
+function onProgress(stage, message) {
+  setProgress(true, STAGE_MESSAGES[stage] || message || stage);
+}
 
+function setBusy(label) {
   compressBtn.disabled = true;
-  compressBtn.textContent = 'Compressing…';
+  compressBtn.textContent = label;
   hideResult();
   setStatus('');
   setProgress(true, 'Loading Ghostscript engine…');
+}
+
+function resetBusy() {
+  compressBtn.disabled = false;
+  compressBtn.textContent = MODE_UI[mode].buttonText;
+  setProgress(false);
+}
+
+function bindSingleDownload(result, filename) {
+  revokeBlobUrls();
+  const blob = new Blob([result.bytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  currentBlobUrls = [url];
+  downloadLink.href = url;
+  downloadLink.download = filename;
+  downloadLink.classList.remove('hidden');
+  zipLink.classList.add('hidden');
+}
+
+function renderImageResult(result, baseName) {
+  revokeBlobUrls();
+  imageGrid.classList.remove('hidden');
+  imageGrid.textContent = '';
+
+  const urls = result.images.map((img) => URL.createObjectURL(
+    new Blob([img.bytes], { type: img.name.endsWith('.jpg') ? 'image/jpeg' : 'image/png' })
+  ));
+  currentBlobUrls = urls;
+
+  result.images.forEach((img, i) => {
+    const cell = document.createElement('a');
+    cell.className = 'image-cell';
+    cell.href = urls[i];
+    cell.download = img.name;
+    cell.title = img.name;
+
+    const thumb = document.createElement('img');
+    thumb.src = urls[i];
+    thumb.alt = img.name;
+    thumb.loading = 'lazy';
+
+    const label = document.createElement('span');
+    label.textContent = img.name;
+
+    cell.appendChild(thumb);
+    cell.appendChild(label);
+    imageGrid.appendChild(cell);
+  });
+
+  const zipBlob = buildZip(
+    result.images.map((img) => ({
+      name: `${sanitizeFileName(baseName)}-${img.name}`,
+      bytes: img.bytes
+    }))
+  );
+  const zipUrl = URL.createObjectURL(zipBlob);
+  currentBlobUrls.push(zipUrl);
+  zipLink.href = zipUrl;
+  zipLink.download = `${sanitizeFileName(baseName)}-images.zip`;
+  zipLink.classList.remove('hidden');
+  downloadLink.classList.add('hidden');
+}
+
+async function onCompress() {
+  if (!currentFile) return;
+  setBusy('Compressing…');
 
   const arrayBuffer = await currentFile.arrayBuffer();
 
@@ -201,41 +590,158 @@ async function onCompress() {
       file: arrayBuffer,
       preset: selectedPreset(),
       transfer: true,
-      onProgress: (stage, message) => {
-        setProgress(true, STAGE_MESSAGES[stage] || message || stage);
-      }
+      onProgress
     });
 
-    // Build the download using a Blob + object URL, then revoke on next use.
-    revokeBlobUrl();
-    const blob = new Blob([result.bytes], { type: 'application/pdf' });
-    currentBlobUrl = URL.createObjectURL(blob);
+    bindSingleDownload(result, `compressed-${sanitizeFileName(currentFile.name)}.pdf`);
 
+    resultTitle.textContent = 'Done';
+    resultOutputLabel.textContent = 'Compressed';
+    resultSavedLabel.textContent = 'Saved';
     originalSizeEl.textContent = formatBytes(result.originalSize);
     compressedSizeEl.textContent = formatBytes(result.compressedSize);
-    const savedPercent = (result.compressionRatio * 100).toFixed(0);
-    savingsEl.textContent = `${savedPercent}%`;
+    savingsEl.textContent = `${(result.compressionRatio * 100).toFixed(0)}%`;
     processingNoteEl.textContent = `Processed in ${result.processingTimeMs} ms.`;
-    downloadLink.href = currentBlobUrl;
-    downloadLink.download = `compressed-${sanitizeFileName(currentFile.name)}.pdf`;
 
     showResult();
     setStatus('', 'success');
   } catch (err) {
     setStatus(`Compression failed: ${err.message}`, 'error');
   } finally {
-    compressBtn.disabled = false;
-    compressBtn.textContent = 'Compress PDF';
-    setProgress(false);
+    resetBusy();
   }
 }
 
-compressBtn.addEventListener('click', onCompress);
+async function onMerge() {
+  if (mergeFiles.length < 2) return;
+  setBusy('Merging…');
 
-// Revoke any lingering object URL when the page is unloaded.
-window.addEventListener('beforeunload', revokeBlobUrl);
+  const buffers = [];
+  for (const file of mergeFiles) {
+    buffers.push(await file.arrayBuffer());
+  }
+
+  try {
+    const result = await mergePDFs({
+      files: buffers,
+      pageSize: selectedPageSize(mergePageSize),
+      fit: mergeFit.checked,
+      transfer: true,
+      onProgress
+    });
+
+    bindSingleDownload(result, 'merged.pdf');
+
+    resultTitle.textContent = 'Done';
+    resultOutputLabel.textContent = 'Merged';
+    resultSavedLabel.textContent = 'Size delta';
+    originalSizeEl.textContent = formatBytes(result.originalSize);
+    compressedSizeEl.textContent = formatBytes(result.compressedSize);
+    const deltaPercent = (result.compressionRatio * 100).toFixed(0);
+    savingsEl.textContent = `${deltaPercent >= 0 ? '+' : ''}${deltaPercent}%`;
+    processingNoteEl.textContent =
+      `Merged ${result.fileCount} files in ${result.processingTimeMs} ms.`;
+
+    showResult();
+    setStatus('', 'success');
+  } catch (err) {
+    setStatus(`Merge failed: ${err.message}`, 'error');
+  } finally {
+    resetBusy();
+  }
+}
+
+async function onPdf2Image() {
+  if (!currentFile) return;
+  setBusy('Converting…');
+
+  const arrayBuffer = await currentFile.arrayBuffer();
+
+  try {
+    const result = await pdfToImages({
+      file: arrayBuffer,
+      format: imageFormat.value,
+      dpi: Number(imageDpi.value),
+      transfer: true,
+      onProgress
+    });
+
+    renderImageResult(result, currentFile.name);
+
+    resultTitle.textContent = `${result.count} page${result.count === 1 ? '' : 's'} rendered`;
+    resultOutputLabel.textContent = 'Images';
+    resultSavedLabel.textContent = 'Pages';
+    originalSizeEl.textContent = formatBytes(result.originalSize);
+    compressedSizeEl.textContent = `${result.count}`;
+    savingsEl.textContent = formatBytes(
+      result.images.reduce((sum, img) => sum + img.bytes.length, 0)
+    );
+    processingNoteEl.textContent = `Rendered in ${result.processingTimeMs} ms.`;
+
+    showResult();
+    setStatus('', 'success');
+  } catch (err) {
+    setStatus(`Conversion failed: ${err.message}`, 'error');
+  } finally {
+    resetBusy();
+  }
+}
+
+async function onImage2Pdf() {
+  if (mergeFiles.length < 1) return;
+  setBusy('Creating PDF…');
+
+  const buffers = [];
+  for (const file of mergeFiles) {
+    buffers.push(await file.arrayBuffer());
+  }
+
+  try {
+    const result = await imagesToPdf({
+      images: buffers,
+      pageSize: selectedPageSize(imagepdfPageSize),
+      fit: imagepdfFit.checked,
+      transfer: true,
+      onProgress
+    });
+
+    bindSingleDownload(result, `${sanitizeFileName(mergeFiles[0].name)}.pdf`);
+
+    resultTitle.textContent = 'Done';
+    resultOutputLabel.textContent = 'PDF';
+    resultSavedLabel.textContent = 'Pages';
+    originalSizeEl.textContent = formatBytes(result.originalSize);
+    compressedSizeEl.textContent = formatBytes(result.compressedSize);
+    savingsEl.textContent = `${result.fileCount}`;
+    processingNoteEl.textContent =
+      `Created a ${result.fileCount}-page PDF in ${result.processingTimeMs} ms.`;
+
+    showResult();
+    setStatus('', 'success');
+  } catch (err) {
+    setStatus(`PDF creation failed: ${err.message}`, 'error');
+  } finally {
+    resetBusy();
+  }
+}
+
+compressBtn.addEventListener('click', () => {
+  if (mode === 'compress') {
+    onCompress();
+  } else if (mode === 'merge') {
+    onMerge();
+  } else if (mode === 'pdf2image') {
+    onPdf2Image();
+  } else {
+    onImage2Pdf();
+  }
+});
+
+// Revoke any lingering object URLs when the page is unloaded.
+window.addEventListener('beforeunload', revokeBlobUrls);
 
 // ---- init ----------------------------------------------------------------------
 
 renderPresets();
-setStatus('Select a PDF to begin.');
+renderOptions();
+setMode('compress');

@@ -108,9 +108,75 @@
 
   var PRESET_NAMES = Object.freeze(['extreme', 'balanced', 'highQuality']);
 
+  /*
+   * Closed set of page sizes. `w`/`h` are the media box in PostScript
+   * points (used by the image->PDF writer); `args` are the Ghostscript
+   * switches used when merging PDFs onto a fixed page size. `auto` keeps
+   * each page at its original size (PDF merge) or makes the page exactly
+   * the image size (image->PDF).
+   *
+   * Only these names are ever accepted from the web UI; the raw
+   * Ghostscript switches never leave this file.
+   */
+  var PAGE_SIZES = Object.freeze({
+    auto: Object.freeze({ label: 'Original size', args: [], w: 0, h: 0 }),
+    a4: Object.freeze({
+      label: 'A4 (210 × 297 mm)',
+      args: ['-sPAPERSIZE=a4'],
+      w: 595.28,
+      h: 841.89
+    }),
+    letter: Object.freeze({
+      label: 'Letter (8.5 × 11 in)',
+      args: ['-sPAPERSIZE=letter'],
+      w: 612,
+      h: 792
+    }),
+    legal: Object.freeze({
+      label: 'Legal (8.5 × 14 in)',
+      args: ['-sPAPERSIZE=legal'],
+      w: 612,
+      h: 1008
+    }),
+    executive: Object.freeze({
+      label: 'Executive (7.25 × 10.5 in)',
+      args: ['-sPAPERSIZE=executive'],
+      w: 522,
+      h: 756
+    }),
+    a3: Object.freeze({
+      label: 'A3 (297 × 420 mm)',
+      args: ['-sPAPERSIZE=a3'],
+      w: 841.89,
+      h: 1190.55
+    })
+  });
+  var PAGE_SIZE_NAMES = Object.freeze(['auto', 'a4', 'letter', 'legal', 'executive', 'a3']);
+
+  /* Closed set of rasterization resolutions for PDF -> image. */
+  var IMAGE_DPIS = Object.freeze({
+    72: Object.freeze({ label: '72 dpi (draft)', args: ['-r72'] }),
+    150: Object.freeze({ label: '150 dpi', args: ['-r150'] }),
+    300: Object.freeze({ label: '300 dpi (print)', args: ['-r300'] })
+  });
+  var IMAGE_DPI_NAMES = Object.freeze([72, 150, 300]);
+
+  /* Closed set of raster image formats for PDF -> image. */
+  var IMAGE_FORMATS = Object.freeze({
+    png: Object.freeze({ label: 'PNG', device: 'png16m' }),
+    jpeg: Object.freeze({ label: 'JPEG', device: 'jpeg' })
+  });
+  var IMAGE_FORMAT_NAMES = Object.freeze(['png', 'jpeg']);
+
   var bundle = Object.freeze({
     PRESETS: PRESETS,
-    PRESET_NAMES: PRESET_NAMES
+    PRESET_NAMES: PRESET_NAMES,
+    PAGE_SIZES: PAGE_SIZES,
+    PAGE_SIZE_NAMES: PAGE_SIZE_NAMES,
+    IMAGE_DPIS: IMAGE_DPIS,
+    IMAGE_DPI_NAMES: IMAGE_DPI_NAMES,
+    IMAGE_FORMATS: IMAGE_FORMATS,
+    IMAGE_FORMAT_NAMES: IMAGE_FORMAT_NAMES
   });
 
   root.GSPresets = bundle;

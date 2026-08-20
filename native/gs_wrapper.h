@@ -57,6 +57,25 @@ int gs_process_pdf_argv(
 );
 
 /*
+ * Merge multiple PDF files into a single PDF via the pdfwrite device.
+ *
+ * inputs_blob - newline-delimited list of absolute paths inside the
+ *               Emscripten virtual filesystem (in merge order)
+ * output_path - absolute path for the resulting merged PDF
+ * extra_args  - newline-delimited list of extra Ghostscript options, or
+ *               an empty string to preserve quality (no downsampling)
+ *
+ * The fixed safety + pdfwrite base arguments are added by this function.
+ *
+ * Returns 0 on success, non-zero Ghostscript error code on failure.
+ */
+int gs_process_pdfs(
+    const char *inputs_blob,
+    const char *output_path,
+    const char *extra_args
+);
+
+/*
  * Run Ghostscript with a caller-supplied option list.
  *
  * DEV/benchmark helper only. NOT used by the web worker. The caller

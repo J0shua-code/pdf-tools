@@ -12,7 +12,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { loadModule, getPresets, compressBytes, isValidPdf } from './helpers.js';
+import { loadModule, getPresets, compressBytes, mergeBytes, buildImagesPdf, pdfToImageBytes, isValidPdf, extractText, tokenContainment } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -62,6 +62,158 @@ async function run() {
         failures++;
         console.error(`✗ ${inputName} @ ${preset}: ${err.message}`);
       }
+    }
+  }
+
+  // Merge: concatenate several PDFs into one via gs_process_pdfs.
+  {
+    const mergeInputs = ['simple.pdf', 'images.pdf', 'large.pdf'];
+    const mergeBytesArr = [];
+    for (const name of mergeInputs) {
+      mergeBytesArr.push(await fs.readFile(path.join(INPUT_DIR, name)));
+    }
+
+    try {
+      const merged = await mergeBytes(module, mergeBytesArr);
+
+      if (merged.code !== 0) {
+        throw new Error(`Merge exited with code ${merged.code}`);
+      }
+      if (!isValidPdf(merged.bytes)) {
+        throw new Error('Merged output is not a valid PDF (bad magic bytes)');
+      }
+      if (merged.bytes.length === 0) {
+        throw new Error('Merged output is empty');
+      }
+
+      // Every input document must actually be present in the merged output
+      // (guards against a merge that silently drops all but the first file).
+      const mergedText = await extractText(module, merged.bytes);
+      if (!mergedText) {
+        throw new Error('Could not extract text from the merged output');
+      }
+      for (const name of mergeInputs) {
+        const inputBytes = await fs.readFile(path.join(INPUT_DIR, name));
+        const inputText = await extractText(module, inputBytes);
+        if (inputText) {
+          const containment = tokenContainment(inputText, mergedText);
+          if (containment < 0.8) {
+            throw new Error(
+              `${name} text not preserved in merged output (containment ${containment.toFixed(3)})`
+            );
+          }
+        }
+      }
+
+      const outputPath = path.join(OUTPUT_DIR, 'merged-simple-images-large.pdf');
+      await fs.writeFile(outputPath, merged.bytes);
+
+      console.log(
+        `✓ merge simple+images+large: ${merged.originalSize} -> ${merged.compressedSize} bytes ` +
+        `(${merged.processingTimeMs} ms)`
+      );
+    } catch (err) {
+      failures++;
+      console.error(`✗ merge simple+images+large: ${err.message}`);
+    }
+  }
+
+  // Merge with a fixed page size (A4 + fit-to-page).
+  {
+    const inputs = ['simple.pdf', 'images.pdf', 'large.pdf'];
+    const arr = [];
+    for (const name of inputs) {
+      arr.push(await fs.readFile(path.join(INPUT_DIR, name)));
+    }
+
+    try {
+      const merged = await mergeBytes(module, arr, { pageSize: 'a4', fit: true });
+
+      if (merged.code !== 0) {
+        throw new Error(`Merge (A4) exited with code ${merged.code}`);
+      }
+      if (!isValidPdf(merged.bytes)) {
+        throw new Error('Merged (A4) output is not a valid PDF (bad magic bytes)');
+      }
+
+      const outputPath = path.join(OUTPUT_DIR, 'merged-a4-fit.pdf');
+      await fs.writeFile(outputPath, merged.bytes);
+
+      console.log(
+        `✓ merge simple+images+large (A4 fit): ${merged.originalSize} -> ` +
+        `${merged.compressedSize} bytes (${merged.processingTimeMs} ms)`
+      );
+    } catch (err) {
+      failures++;
+      console.error(`✗ merge A4+fit: ${err.message}`);
+    }
+  }
+
+  // PDF -> image: rasterize simple.pdf to PNG via gs_run.
+  {
+    const simple = await fs.readFile(path.join(INPUT_DIR, 'simple.pdf'));
+
+    try {
+      const res = await pdfToImageBytes(module, simple, { format: 'png', dpi: 150 });
+
+      if (res.code !== 0) {
+        throw new Error(`PDF->PNG exited with code ${res.code}`);
+      }
+      if (res.count !== 1) {
+        throw new Error(`Expected 1 page, got ${res.count}`);
+      }
+      const png = res.images[0].bytes;
+      const magic = String.fromCharCode(png[0], png[1], png[2], png[3]);
+      if (magic !== '\x89PNG') {
+        throw new Error('Output is not a PNG (bad magic bytes)');
+      }
+
+      const outputPath = path.join(OUTPUT_DIR, 'simple-page-1.png');
+      await fs.writeFile(outputPath, png);
+
+      console.log(`✓ PDF->PNG: 1 page, ${png.length} bytes`);
+    } catch (err) {
+      failures++;
+      console.error(`✗ PDF->PNG: ${err.message}`);
+    }
+  }
+
+  // Image -> PDF: render a page to JPEG, embed it with the pure-JS writer,
+  // then confirm Ghostscript can re-read the produced PDF (round trip).
+  {
+    const simple = await fs.readFile(path.join(INPUT_DIR, 'simple.pdf'));
+
+    try {
+      const rendered = await pdfToImageBytes(module, simple, { format: 'jpeg', dpi: 96 });
+      if (rendered.code !== 0 || rendered.count !== 1) {
+        throw new Error(`Render to JPEG failed: code ${rendered.code}, ${rendered.count} images`);
+      }
+
+      const pdfBytes = buildImagesPdf([rendered.images[0].bytes], { pageSize: 'a4', fit: true });
+
+      if (!isValidPdf(pdfBytes)) {
+        throw new Error('Image->PDF output is not a valid PDF (bad magic bytes)');
+      }
+
+      // Ghostscript must be able to read the JS-produced PDF back.
+      const back = await pdfToImageBytes(module, pdfBytes, { format: 'png', dpi: 72 });
+      if (back.code !== 0 || back.count !== 1) {
+        throw new Error(
+          `Ghostscript could not read the image->PDF output ` +
+          `(code ${back.code}, ${back.count} pages)`
+        );
+      }
+
+      const outputPath = path.join(OUTPUT_DIR, 'image-to-pdf-a4.pdf');
+      await fs.writeFile(outputPath, pdfBytes);
+
+      console.log(
+        `✓ image->PDF round trip (A4 fit): ${rendered.images[0].bytes.length} -> ` +
+        `${pdfBytes.length} bytes, GS re-read ok`
+      );
+    } catch (err) {
+      failures++;
+      console.error(`✗ image->PDF round trip: ${err.message}`);
     }
   }
 

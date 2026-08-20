@@ -50,7 +50,7 @@ emcc \
   "${NATIVE_DIR}/gs_wrapper.c" \
   "${LIBGS}" \
   -o "${DIST_DIR}/ghostscript.js" \
-  -s EXPORTED_FUNCTIONS='["_gs_initialize","_gs_process_pdf","_gs_process_pdf_argv","_gs_run","_gs_get_last_error","_gs_shutdown","_malloc","_free"]' \
+  -s EXPORTED_FUNCTIONS='["_gs_initialize","_gs_process_pdf","_gs_process_pdf_argv","_gs_process_pdfs","_gs_run","_gs_get_last_error","_gs_shutdown","_malloc","_free"]' \
   -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","FS","HEAPU8"]' \
   -s ALLOW_MEMORY_GROWTH=1 \
   -s INITIAL_MEMORY=64MB \
@@ -76,6 +76,9 @@ cp "${PROJECT_ROOT}/worker/ghostscript.worker.js" "${DIST_DIR}/ghostscript.worke
 
 # Copy the preset definitions (loaded by the worker via importScripts).
 cp "${PROJECT_ROOT}/shared/presets.js" "${DIST_DIR}/presets.js"
+
+# Copy the image->PDF writer (loaded by the worker via importScripts).
+cp "${PROJECT_ROOT}/shared/pdf-writer.js" "${DIST_DIR}/pdf-writer.js"
 
 echo "Relink complete. Artifacts in ${DIST_DIR}:"
 ls -lh "${DIST_DIR}"

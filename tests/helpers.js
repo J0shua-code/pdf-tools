@@ -7,6 +7,7 @@ import path from 'node:path';
 // Side-effect: this plain script sets `globalThis.GSPresets` when loaded
 // as a module (the repo is "type": "module").
 import '../shared/presets.js';
+import '../shared/pdf-writer.js';
 
 let loadedDist = null;
 
@@ -73,6 +74,163 @@ export async function compressBytes(module, inputBytes, presetName) {
       : 0,
     processingTimeMs
   };
+}
+
+/**
+ * Merge multiple PDF byte arrays into one via the WASM module directly.
+ * Options: pageSize ('auto' | PAGE_SIZE_NAMES), fit (boolean).
+ */
+export async function mergeBytes(module, inputBytesList, options = {}) {
+  const jobId = Math.random().toString(36).slice(2);
+  const workDir = `/work/merge-${jobId}`;
+  const outputPath = `${workDir}/output.pdf`;
+  const FS = module.FS;
+
+  const inputPaths = [];
+  FS.mkdirTree(workDir);
+  inputBytesList.forEach((bytes, i) => {
+    const inputPath = `${workDir}/input-${i}.pdf`;
+    FS.writeFile(inputPath, bytes);
+    inputPaths.push(inputPath);
+  });
+
+  const processPdfs = module.cwrap('gs_process_pdfs', 'number', [
+    'string',
+    'string',
+    'string'
+  ]);
+  const started = performance.now();
+  const extraArgs = mergePageArgs(options.pageSize, options.fit).join('\n');
+  const code = processPdfs(inputPaths.join('\n'), outputPath, extraArgs);
+  const processingTimeMs = Math.round(performance.now() - started);
+
+  const bytes = code === 0 ? FS.readFile(outputPath) : new Uint8Array(0);
+
+  for (const inputPath of inputPaths) {
+    try { FS.unlink(inputPath); } catch (e) { /* ignore */ }
+  }
+  try { FS.unlink(outputPath); } catch (e) { /* ignore */ }
+  try { FS.rmdir(workDir); } catch (e) { /* ignore */ }
+
+  return {
+    code,
+    bytes,
+    originalSize: inputBytesList.reduce((sum, b) => sum + b.length, 0),
+    compressedSize: bytes.length,
+    processingTimeMs
+  };
+}
+
+/* Ghostscript switches for a fixed page size (mirrors the worker helper). */
+export function mergePageArgs(pageSize, fit) {
+  const size = GSPresets.PAGE_SIZES[pageSize] || GSPresets.PAGE_SIZES.auto;
+  const args = size.args.slice();
+  if (fit !== false && pageSize !== 'auto') {
+    args.push('-dPDFFitPage');
+  }
+  return args;
+}
+
+/**
+ * Rasterize PDF bytes to one image per page via gs_run.
+ * Options: format ('png'|'jpeg'), dpi (72|150|300).
+ */
+export async function pdfToImageBytes(module, inputBytes, options = {}) {
+  const format = options.format || 'png';
+  const dpi = options.dpi || 150;
+  const ext = format === 'jpeg' ? 'jpg' : 'png';
+  const device = format === 'jpeg' ? 'jpeg' : 'png16m';
+
+  const jobId = Math.random().toString(36).slice(2);
+  const workDir = `/work/toimg-${jobId}`;
+  const inPath = `${workDir}/in.pdf`;
+  const outPattern = `${workDir}/page-%d.${ext}`;
+  const FS = module.FS;
+
+  FS.mkdirTree(workDir);
+  FS.writeFile(inPath, inputBytes);
+
+  const run = module.cwrap('gs_run', 'number', ['string', 'string', 'string']);
+  const args = [
+    `-sDEVICE=${device}`,
+    `-r${dpi}`,
+    '-dFirstPage=1',
+    '-dLastPage=10000',
+    '-dTextAlphaBits=4',
+    '-dGraphicsAlphaBits=4',
+    format === 'jpeg' ? '-dJPEGQ=92' : ''
+  ].filter(Boolean);
+
+  const started = performance.now();
+  const code = run(inPath, outPattern, args.join('\n'));
+  const processingTimeMs = Math.round(performance.now() - started);
+
+  const images = code === 0
+    ? FS.readdir(workDir)
+        .filter((name) => new RegExp(`^page-\\d+\\.${ext}$`).test(name))
+        .sort((a, b) => parseInt(a.match(/\d+/)[0], 10) - parseInt(b.match(/\d+/)[0], 10))
+        .map((name) => ({ name, bytes: FS.readFile(`${workDir}/${name}`) }))
+    : [];
+
+  for (const img of images) {
+    try { FS.unlink(`${workDir}/${img.name}`); } catch (e) { /* ignore */ }
+  }
+  try { FS.unlink(inPath); } catch (e) { /* ignore */ }
+  try { FS.rmdir(workDir); } catch (e) { /* ignore */ }
+
+  return { code, images, count: images.length, processingTimeMs };
+}
+
+/* Walk the JPEG marker stream to the first SOF (mirrors the worker helper). */
+export function parseJpeg(bytes) {
+  let i = 2;
+  while (i + 1 < bytes.length) {
+    if (bytes[i] !== 0xff) {
+      i++;
+      continue;
+    }
+    const marker = bytes[i + 1];
+    i += 2;
+    if (marker === 0xd8 || marker === 0x01) continue;
+    if (marker >= 0xd0 && marker <= 0xd7) continue;
+    if (marker === 0xd9 || marker === 0xda) break;
+    if (i + 1 >= bytes.length) break;
+    const len = (bytes[i] << 8) | bytes[i + 1];
+    if (len < 2) break;
+    if (
+      marker >= 0xc0 && marker <= 0xcf &&
+      marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc
+    ) {
+      if (i + 7 >= bytes.length) return null;
+      return {
+        width: (bytes[i + 5] << 8) | bytes[i + 6],
+        height: (bytes[i + 3] << 8) | bytes[i + 4],
+        components: bytes[i + 7]
+      };
+    }
+    i += len;
+  }
+  return null;
+}
+
+/**
+ * Build a PDF from JPEG byte arrays via the pure-JS writer (no Ghostscript).
+ * Options: pageSize ('auto' | PAGE_SIZE_NAMES), fit (boolean).
+ */
+export function buildImagesPdf(jpegBytesList, options = {}) {
+  if (!globalThis.PDF_WRITER) {
+    throw new Error('PDF_WRITER global not set; import shared/pdf-writer.js first');
+  }
+  const pageSize = options.pageSize || 'auto';
+  const size = GSPresets.PAGE_SIZES[pageSize];
+  const images = jpegBytesList.map((jpeg, i) => {
+    const dims = parseJpeg(jpeg);
+    if (!dims || dims.width <= 0 || dims.height <= 0) {
+      throw new Error(`image ${i} is not a parseable JPEG`);
+    }
+    return { jpeg, width: dims.width, height: dims.height, components: dims.components };
+  });
+  return PDF_WRITER.writePdf(images, { w: size.w, h: size.h, fit: options.fit !== false });
 }
 
 export function isValidPdf(bytes) {

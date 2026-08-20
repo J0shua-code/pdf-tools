@@ -3,38 +3,92 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PDF Compressor — in your browser</title>
+  <title>PDF Tools — in your browser</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main class="container">
-    <h1>PDF Compressor</h1>
+    <h1>PDF Tools</h1>
     <p class="subtitle">
-      Compress PDFs entirely in your browser with Ghostscript compiled to WebAssembly.
-      Your file is never uploaded.
+      Compress, merge, convert PDFs to images and images to PDFs entirely in your
+      browser with Ghostscript compiled to WebAssembly. Your files are never uploaded.
     </p>
 
     <section class="card">
-      <!-- Step 1: pick a file -->
-      <div class="drop-zone" id="drop-zone" tabindex="0" role="button" aria-label="Select a PDF file">
+      <!-- Step 0: pick an action -->
+      <div class="mode-toggle" role="tablist" aria-label="Choose a tool">
+        <button type="button" id="mode-compress" class="mode-btn active" role="tab" aria-selected="true">
+          Compress
+        </button>
+        <button type="button" id="mode-merge" class="mode-btn" role="tab" aria-selected="false">
+          Merge
+        </button>
+        <button type="button" id="mode-pdf2image" class="mode-btn" role="tab" aria-selected="false">
+          PDF → Image
+        </button>
+        <button type="button" id="mode-image2pdf" class="mode-btn" role="tab" aria-selected="false">
+          Image → PDF
+        </button>
+      </div>
+
+      <!-- Step 1: pick file(s) -->
+      <div class="drop-zone" id="drop-zone" tabindex="0" role="button" aria-label="Select files">
         <div class="drop-zone-icon" aria-hidden="true">⬆</div>
         <span id="drop-text">Select a PDF, or drag it here</span>
         <input type="file" id="file-input" accept="application/pdf" hidden>
       </div>
 
-      <!-- File info shown once selected -->
+      <!-- File info shown once selected (single-file modes) -->
       <div id="file-info" class="file-info hidden">
         <div class="file-info-name" id="file-name">-</div>
         <div class="file-info-size" id="file-size">-</div>
       </div>
 
-      <!-- Step 2: pick a preset -->
-      <fieldset class="controls" id="preset-group">
+      <!-- File list shown once selected (multi-file modes) -->
+      <div id="file-list" class="file-list hidden"></div>
+
+      <!-- Compression preset (compress mode only) -->
+      <fieldset class="controls hidden" id="preset-group">
         <legend>Compression preset</legend>
         <!-- preset radios injected from PRESET_META -->
       </fieldset>
 
-      <!-- Step 3: go -->
+      <!-- Page size for merging PDFs -->
+      <fieldset class="controls hidden" id="merge-options">
+        <legend>Page size</legend>
+        <div class="control-row">
+          <select id="merge-page-size" aria-label="Merge page size"></select>
+          <label class="check">
+            <input type="checkbox" id="merge-fit" checked>
+            Fit pages to size
+          </label>
+        </div>
+        <p class="control-hint">Merges the documents onto a uniform page size.</p>
+      </fieldset>
+
+      <!-- Output format for PDF -> Image -->
+      <fieldset class="controls hidden" id="image-options">
+        <legend>Output format</legend>
+        <div class="control-row">
+          <select id="image-format" aria-label="Image format"></select>
+          <select id="image-dpi" aria-label="Resolution"></select>
+        </div>
+      </fieldset>
+
+      <!-- Page size for Image -> PDF -->
+      <fieldset class="controls hidden" id="imagepdf-options">
+        <legend>Page size</legend>
+        <div class="control-row">
+          <select id="imagepdf-page-size" aria-label="Image PDF page size"></select>
+          <label class="check">
+            <input type="checkbox" id="imagepdf-fit" checked>
+            Fit images to page
+          </label>
+        </div>
+        <p class="control-hint">"Original size" makes each page exactly the image size.</p>
+      </fieldset>
+
+      <!-- Step 2: go -->
       <button id="compress-btn" class="compress-btn" disabled>Compress PDF</button>
 
       <!-- Progress -->
@@ -48,25 +102,31 @@
 
       <!-- Results -->
       <div id="result" class="result hidden">
-        <h2>Done</h2>
+        <h2 id="result-title">Done</h2>
         <div class="result-grid">
           <div class="result-cell">
             <span class="result-label">Original</span>
             <span class="result-value" id="original-size">-</span>
           </div>
           <div class="result-cell">
-            <span class="result-label">Compressed</span>
+            <span class="result-label" id="result-output-label">Compressed</span>
             <span class="result-value" id="compressed-size">-</span>
           </div>
           <div class="result-cell">
-            <span class="result-label">Saved</span>
+            <span class="result-label" id="result-saved-label">Saved</span>
             <span class="result-value" id="savings">-</span>
           </div>
         </div>
         <p class="result-note" id="processing-note">Processed in - ms.</p>
-        <a id="download-link" class="download-link" href="#" download="compressed.pdf">
-          Download Compressed PDF
-        </a>
+        <div id="image-grid" class="image-grid hidden"></div>
+        <div class="result-actions">
+          <a id="download-link" class="download-link hidden" href="#" download="document.pdf">
+            Download PDF
+          </a>
+          <a id="zip-link" class="download-link alt hidden" href="#" download="images.zip">
+            Download all (.zip)
+          </a>
+        </div>
       </div>
     </section>
 

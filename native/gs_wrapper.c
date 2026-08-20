@@ -12,6 +12,7 @@
 #include "ierrors.h"  /* gs_error_* codes */
 
 #define MAX_OPTIONS   96
+#define MAX_INPUTS    96
 #define MAX_OPTION_LEN 256
 
 static void *gs_instance = NULL;
@@ -187,11 +188,14 @@ static int split_option_lines(const char *blob, char out[MAX_OPTIONS][MAX_OPTION
 /*
  * Core runner: build the argument list and invoke Ghostscript once.
  *
+ * input_paths  - one or more input files; for pdfwrite these are
+ *                concatenated into a single output (used for merging).
  * include_pdfwrite_base selects whether the fixed pdfwrite device
- * arguments are prepended (used by the compress path). The safety
+ * arguments are prepended (used by the compress/merge paths). The safety
  * arguments (-dNOPAUSE -dBATCH -dSAFER etc.) are always included.
  */
-static int run_gs(const char *input_path, const char *output_path,
+static int run_gs(const char *input_paths[], int num_inputs,
+                  const char *output_path,
                   const char *option_blob, int include_pdfwrite_base)
 {
     int code;
@@ -218,7 +222,7 @@ static int run_gs(const char *input_path, const char *output_path,
         NULL
     };
 
-    if (input_path == NULL || output_path == NULL) {
+    if (input_paths == NULL || num_inputs < 1 || output_path == NULL) {
         return gs_error_Fatal;
     }
 
@@ -241,7 +245,7 @@ static int run_gs(const char *input_path, const char *output_path,
 
     option_count = split_option_lines(option_blob, option_storage);
 
-    const char *argv[6 + 3 + MAX_OPTIONS + 4];
+    const char *argv[6 + 3 + MAX_OPTIONS + 2 + MAX_INPUTS + 1];
     int argc = 0;
 
     for (i = 0; base_argv[i] != NULL; i++) {
@@ -259,8 +263,9 @@ static int run_gs(const char *input_path, const char *output_path,
     (void)snprintf(output_device_arg, sizeof(output_device_arg),
                    "-sOutputFile=%s", output_path);
     argv[argc++] = output_device_arg;
-    argv[argc++] = "--";
-    argv[argc++] = input_path;
+    for (i = 0; i < num_inputs; i++) {
+        argv[argc++] = input_paths[i];
+    }
     argv[argc] = NULL;
 
     /*
@@ -309,7 +314,8 @@ int gs_process_pdf(
     const char *preset
 )
 {
-    return run_gs(input_path, output_path, preset_to_args(preset), 1);
+    const char *inputs[1] = { input_path };
+    return run_gs(inputs, 1, output_path, preset_to_args(preset), 1);
 }
 
 int gs_process_pdf_argv(
@@ -318,7 +324,29 @@ int gs_process_pdf_argv(
     const char *extra_args
 )
 {
-    return run_gs(input_path, output_path, extra_args, 1);
+    const char *inputs[1] = { input_path };
+    return run_gs(inputs, 1, output_path, extra_args, 1);
+}
+
+int gs_process_pdfs(
+    const char *inputs_blob,
+    const char *output_path,
+    const char *extra_args
+)
+{
+    char path_storage[MAX_INPUTS][MAX_OPTION_LEN];
+    const char *inputs[MAX_INPUTS];
+    int n = split_option_lines(inputs_blob, path_storage);
+    int i;
+
+    if (n < 1) {
+        return gs_error_Fatal;
+    }
+    for (i = 0; i < n; i++) {
+        inputs[i] = path_storage[i];
+    }
+
+    return run_gs(inputs, n, output_path, extra_args, 1);
 }
 
 int gs_run(
@@ -327,7 +355,8 @@ int gs_run(
     const char *args_blob
 )
 {
-    return run_gs(input_path, output_path, args_blob, 0);
+    const char *inputs[1] = { input_path };
+    return run_gs(inputs, 1, output_path, args_blob, 0);
 }
 
 const char *gs_get_last_error(void)
