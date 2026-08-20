@@ -1,0 +1,35 @@
+name: Release Version Check
+
+on:
+  schedule:
+    # Run weekly on Mondays at 09:00 UTC.
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check current Ghostscript release
+        run: |
+          LATEST=$(curl -s https://api.github.com/repos/ArtifexSoftware/ghostpdl-downloads/releases/latest | jq -r '.tag_name')
+          CURRENT=$(grep GHOSTSCRIPT_TAG versions.env | cut -d= -f2)
+          echo "Current pinned release: ${CURRENT}"
+          echo "Latest upstream release: ${LATEST}"
+          if [ "${LATEST}" != "${CURRENT}" ]; then
+            echo "::warning::A new Ghostscript release is available: ${LATEST} (current: ${CURRENT})"
+          fi
+
+      - name: Check current Emscripten release
+        run: |
+          # emsdk tags follow the Emscripten version.
+          LATEST=$(curl -s https://api.github.com/repos/emscripten-core/emscripten/releases/latest | jq -r '.tag_name')
+          CURRENT=$(grep EMSCRIPTEN_VERSION versions.env | cut -d= -f2)
+          echo "Current pinned Emscripten: ${CURRENT}"
+          echo "Latest upstream Emscripten: ${LATEST}"
+          if [ "${LATEST}" != "${CURRENT}" ]; then
+            echo "::warning::A new Emscripten release is available: ${LATEST} (current: ${CURRENT})"
+          fi

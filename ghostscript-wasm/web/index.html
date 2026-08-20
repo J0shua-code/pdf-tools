@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF Compressor — in your browser</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="container">
+    <h1>PDF Compressor</h1>
+    <p class="subtitle">
+      Compress PDFs entirely in your browser with Ghostscript compiled to WebAssembly.
+      Your file is never uploaded.
+    </p>
+
+    <section class="card">
+      <!-- Step 1: pick a file -->
+      <div class="drop-zone" id="drop-zone" tabindex="0" role="button" aria-label="Select a PDF file">
+        <div class="drop-zone-icon" aria-hidden="true">⬆</div>
+        <span id="drop-text">Select a PDF, or drag it here</span>
+        <input type="file" id="file-input" accept="application/pdf" hidden>
+      </div>
+
+      <!-- File info shown once selected -->
+      <div id="file-info" class="file-info hidden">
+        <div class="file-info-name" id="file-name">-</div>
+        <div class="file-info-size" id="file-size">-</div>
+      </div>
+
+      <!-- Step 2: pick a preset -->
+      <fieldset class="controls" id="preset-group">
+        <legend>Compression preset</legend>
+        <!-- preset radios injected from PRESET_META -->
+      </fieldset>
+
+      <!-- Step 3: go -->
+      <button id="compress-btn" class="compress-btn" disabled>Compress PDF</button>
+
+      <!-- Progress -->
+      <div id="progress" class="progress hidden" aria-live="polite">
+        <span class="spinner" aria-hidden="true"></span>
+        <span id="progress-text">Loading…</span>
+      </div>
+
+      <!-- Status / error -->
+      <div id="status" class="status" aria-live="polite"></div>
+
+      <!-- Results -->
+      <div id="result" class="result hidden">
+        <h2>Done</h2>
+        <div class="result-grid">
+          <div class="result-cell">
+            <span class="result-label">Original</span>
+            <span class="result-value" id="original-size">-</span>
+          </div>
+          <div class="result-cell">
+            <span class="result-label">Compressed</span>
+            <span class="result-value" id="compressed-size">-</span>
+          </div>
+          <div class="result-cell">
+            <span class="result-label">Saved</span>
+            <span class="result-value" id="savings">-</span>
+          </div>
+        </div>
+        <p class="result-note" id="processing-note">Processed in - ms.</p>
+        <a id="download-link" class="download-link" href="#" download="compressed.pdf">
+          Download Compressed PDF
+        </a>
+      </div>
+    </section>
+
+    <footer class="privacy">
+      <strong>Privacy:</strong> all processing happens locally via a Web Worker.
+      Nothing is sent to any server.
+    </footer>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
