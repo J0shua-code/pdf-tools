@@ -10,6 +10,8 @@
  *                          options: { format: "png"|"jpeg", dpi } }
  *   { type: "imagesToPdf", id, images: [ArrayBuffer, ...],
  *                          options: { pageSize, fit, quality } }
+ *   { type: "split",       id, file: ArrayBuffer,
+ *                          options: { mode: "individual"|"extract", pages: string } }
  *
  *   Legacy field `input` (Uint8Array) is also accepted for the compress
  *   path for backwards compatibility with earlier versions.
@@ -592,10 +594,204 @@ async function toImages(module, file, options, id) {
   }
 }
 
+function parsePageRanges(str) {
+  const s = String(str || '').trim();
+  if (!s) throw codedError('INVALID_PAGE_RANGE', 'Enter page numbers, e.g. "1-3, 5"');
+  const parts = s.split(',');
+  const pages = [];
+  const seen = new Set();
+  for (let raw of parts) {
+    raw = raw.trim();
+    if (!raw) continue;
+    const dash = raw.indexOf('-');
+    if (dash !== -1) {
+      const aStr = raw.slice(0, dash).trim();
+      const bStr = raw.slice(dash + 1).trim();
+      const a = parseInt(aStr, 10);
+      const b = parseInt(bStr, 10);
+      if (!Number.isFinite(a) || !Number.isFinite(b) || a < 1 || b < 1 || a > 10000 || b > 10000) {
+        throw codedError('INVALID_PAGE_RANGE', `Invalid range "${raw}" — use numbers like "1-3"`);
+      }
+      if (a > b) throw codedError('INVALID_PAGE_RANGE', `Invalid range "${raw}" — start must be <= end`);
+      if (b - a > 500) throw codedError('INVALID_PAGE_RANGE', `Range "${raw}" too large (max 500 pages at once)`);
+      for (let p = a; p <= b; p++) {
+        if (!seen.has(p)) { seen.add(p); pages.push(p); }
+      }
+    } else {
+      const n = parseInt(raw, 10);
+      if (!Number.isFinite(n) || n < 1 || n > 10000) {
+        throw codedError('INVALID_PAGE_RANGE', `Invalid page "${raw}" — use a number >= 1`);
+      }
+      if (!seen.has(n)) { seen.add(n); pages.push(n); }
+    }
+  }
+  if (pages.length === 0) throw codedError('INVALID_PAGE_RANGE', 'No valid pages found');
+  if (pages.length > 500) throw codedError('INVALID_PAGE_RANGE', 'Too many pages selected (max 500)');
+  return pages;
+}
+
+async function splitPdf(module, file, options, id) {
+  const originalSize = assertValidPdf(file);
+  const mode = (options && options.mode) || 'individual';
+  if (mode !== 'individual' && mode !== 'extract') {
+    throw codedError('INVALID_SPLIT_MODE', `Unknown split mode "${mode}"`);
+  }
+
+  const FS = module.FS;
+  const started = performance.now();
+  const jobId = generateId();
+  const workDir = `/work/job-${jobId}`;
+  const inputPath = `${workDir}/input.pdf`;
+
+  const made = [];
+  let tmpPaths = [];
+  try {
+    postProgress(id, PROGRESS_STAGES.writingInput, 'Writing PDF to memory…');
+    FS.mkdirTree(workDir);
+    FS.writeFile(inputPath, new Uint8Array(file));
+
+    const run = module.cwrap('gs_run', 'number', ['string', 'string', 'string']);
+
+    if (mode === 'individual') {
+      postProgress(id, PROGRESS_STAGES.processing, 'Splitting into individual pages…');
+      const outputPattern = `${workDir}/page-%d.pdf`;
+      const code = run(inputPath, outputPattern, '');
+      if (code !== 0) {
+        const detail = getErrorDetail(module);
+        const err = new Error(`Ghostscript exited with code ${code}.` + (detail ? ` ${detail.trim()}` : ''));
+        err.code = 'GHOSTSCRIPT_ERROR';
+        err.gsCode = code;
+        throw err;
+      }
+      const pageFiles = FS.readdir(workDir)
+        .filter((name) => /^page-\d+\.pdf$/.test(name))
+        .sort((a, b) => parseInt(a.match(/\d+/)[0], 10) - parseInt(b.match(/\d+/)[0], 10));
+      if (pageFiles.length === 0) {
+        // Fallback: try per-page extraction if %d pattern not supported
+        throw codedError('GHOSTSCRIPT_ERROR', 'Could not split pages (no output files)');
+      }
+      const parts = pageFiles.map((name) => {
+        const p = `${workDir}/${name}`;
+        made.push(p);
+        const bytes = FS.readFile(p);
+        const num = parseInt(name.match(/\d+/)[0], 10);
+        return { name: `page-${String(num).padStart(3, '0')}.pdf`, bytes };
+      });
+      const processingTimeMs = Math.round(performance.now() - started);
+      const heapBytesAfter = module.HEAPU8 ? module.HEAPU8.buffer.byteLength : 0;
+      postProgress(id, PROGRESS_STAGES.complete, 'Complete.');
+      return {
+        bytes: null,
+        parts,
+        count: parts.length,
+        originalSize,
+        compressedSize: parts.reduce((s, p) => s + p.bytes.length, 0),
+        processingTimeMs,
+        heapBytesAfter,
+        recycle: originalSize >= RECYCLE_AFTER_BYTES || heapBytesAfter >= RECYCLE_AFTER_HEAP_BYTES
+      };
+    }
+
+    // mode === 'extract'
+    const pagesStr = options.pages || '';
+    const pages = parsePageRanges(pagesStr);
+    // sort pages for extraction but keep original order? Use as given order
+    // For Ghostscript we need to extract in order requested
+    postProgress(id, PROGRESS_STAGES.processing, `Extracting ${pages.length} page(s)…`);
+
+    // Optimize: if pages are contiguous sequential, do single extraction
+    let isContiguous = true;
+    for (let i = 1; i < pages.length; i++) {
+      if (pages[i] !== pages[i - 1] + 1) { isContiguous = false; break; }
+    }
+
+    if (isContiguous && pages.length >= 1) {
+      const first = pages[0];
+      const last = pages[pages.length - 1];
+      const outPath = `${workDir}/output.pdf`;
+      made.push(outPath);
+      const args = [`-dFirstPage=${first}`, `-dLastPage=${last}`].join('\n');
+      const code = run(inputPath, outPath, args);
+      if (code !== 0) {
+        const detail = getErrorDetail(module);
+        const err = new Error(`Ghostscript exited with code ${code}.` + (detail ? ` ${detail.trim()}` : ''));
+        err.code = 'GHOSTSCRIPT_ERROR';
+        err.gsCode = code;
+        throw err;
+      }
+      const bytes = FS.readFile(outPath);
+      const processingTimeMs = Math.round(performance.now() - started);
+      const heapBytesAfter = module.HEAPU8 ? module.HEAPU8.buffer.byteLength : 0;
+      postProgress(id, PROGRESS_STAGES.complete, 'Complete.');
+      return {
+        bytes,
+        originalSize,
+        compressedSize: bytes.length,
+        processingTimeMs,
+        heapBytesAfter,
+        count: pages.length,
+        fileCount: 1,
+        recycle: originalSize >= RECYCLE_AFTER_BYTES || heapBytesAfter >= RECYCLE_AFTER_HEAP_BYTES
+      };
+    }
+
+    // Non-contiguous: extract each page individually then merge
+    for (let i = 0; i < pages.length; i++) {
+      const p = pages[i];
+      const out = `${workDir}/tmp-${i}.pdf`;
+      tmpPaths.push(out);
+      made.push(out);
+      const args = [`-dFirstPage=${p}`, `-dLastPage=${p}`].join('\n');
+      const code = run(inputPath, out, args);
+      if (code !== 0) {
+        const detail = getErrorDetail(module);
+        const err = new Error(`Ghostscript exited with code ${code} on page ${p}.` + (detail ? ` ${detail.trim()}` : ''));
+        err.code = 'GHOSTSCRIPT_ERROR';
+        err.gsCode = code;
+        throw err;
+      }
+      postProgress(id, PROGRESS_STAGES.processing, `Extracted page ${p} (${i + 1}/${pages.length})…`);
+    }
+
+    // Merge the per-page PDFs into one
+    postProgress(id, PROGRESS_STAGES.processing, 'Merging selected pages…');
+    const processPdfs = module.cwrap('gs_process_pdfs', 'number', ['string', 'string', 'string']);
+    const finalPath = `${workDir}/final.pdf`;
+    made.push(finalPath);
+    const inputBlob = tmpPaths.join('\n');
+    const code2 = processPdfs(inputBlob, finalPath, '');
+    if (code2 !== 0) {
+      const detail = getErrorDetail(module);
+      const err = new Error(`Ghostscript exited with code ${code2} while merging.` + (detail ? ` ${detail.trim()}` : ''));
+      err.code = 'GHOSTSCRIPT_ERROR';
+      err.gsCode = code2;
+      throw err;
+    }
+    const bytes = FS.readFile(finalPath);
+    const processingTimeMs = Math.round(performance.now() - started);
+    const heapBytesAfter = module.HEAPU8 ? module.HEAPU8.buffer.byteLength : 0;
+    postProgress(id, PROGRESS_STAGES.complete, 'Complete.');
+    return {
+      bytes,
+      originalSize,
+      compressedSize: bytes.length,
+      processingTimeMs,
+      heapBytesAfter,
+      count: pages.length,
+      fileCount: 1,
+      recycle: originalSize >= RECYCLE_AFTER_BYTES || heapBytesAfter >= RECYCLE_AFTER_HEAP_BYTES
+    };
+  } finally {
+    for (const p of made) { try { FS.unlink(p); } catch (e) { /* ignore */ } }
+    try { FS.unlink(inputPath); } catch (e) { /* ignore */ }
+    try { FS.rmdir(workDir); } catch (e) { /* ignore */ }
+  }
+}
+
 self.onmessage = async function (event) {
   const { type, id } = event.data;
 
-  if (!['compress', 'merge', 'imagesToPdf', 'toImages'].includes(type)) {
+  if (!['compress', 'merge', 'imagesToPdf', 'toImages', 'split'].includes(type)) {
     self.postMessage({ type: 'error', id, error: `Unknown message type: ${type}` });
     return;
   }
@@ -617,6 +813,8 @@ self.onmessage = async function (event) {
       result = await imagesToPdf(module, event.data.images, options, id);
     } else if (type === 'toImages') {
       result = await toImages(module, event.data.file, options, id);
+    } else if (type === 'split') {
+      result = await splitPdf(module, event.data.file, options, id);
     } else {
       result = await compress(module, event.data.file || event.data.input, options, id);
     }
@@ -630,6 +828,11 @@ self.onmessage = async function (event) {
         transferList.push(img.bytes.buffer);
       }
     }
+    if (result.parts) {
+      for (const p of result.parts) {
+        transferList.push(p.bytes.buffer);
+      }
+    }
 
     self.postMessage(
       {
@@ -638,6 +841,7 @@ self.onmessage = async function (event) {
         success: true,
         bytes: result.bytes,
         images: result.images,
+        parts: result.parts,
         count: result.count,
         originalSize: result.originalSize,
         compressedSize: result.compressedSize,
