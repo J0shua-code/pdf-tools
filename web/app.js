@@ -12,6 +12,7 @@ import {
   mergePDFs,
   pdfToImages,
   imagesToPdf,
+  splitPdf,
   PRESET_META,
   PAGE_SIZE_META,
   IMAGE_FORMAT_META,
@@ -35,10 +36,15 @@ const imageFormat = document.getElementById('image-format');
 const imageDpi = document.getElementById('image-dpi');
 const imagepdfPageSize = document.getElementById('imagepdf-page-size');
 const imagepdfFit = document.getElementById('imagepdf-fit');
+const splitOptions = document.getElementById('split-options');
+const splitMode = document.getElementById('split-mode');
+const splitPages = document.getElementById('split-pages');
+const splitPagesRow = document.getElementById('split-pages-row');
 const modeCompress = document.getElementById('mode-compress');
 const modeMerge = document.getElementById('mode-merge');
 const modePdf2Image = document.getElementById('mode-pdf2image');
 const modeImage2Pdf = document.getElementById('mode-image2pdf');
+const modeSplit = document.getElementById('mode-split');
 const compressBtn = document.getElementById('compress-btn');
 const progressEl = document.getElementById('progress');
 const progressText = document.getElementById('progress-text');
@@ -85,6 +91,13 @@ const MODE_UI = {
     status: 'Select at least one image to convert to PDF.',
     accept: 'image/*',
     multiple: true
+  },
+  split: {
+    buttonText: 'Split PDF',
+    dropText: 'Select a PDF to split, or drag it here',
+    status: 'Select a PDF. Choose "Each page" for ZIP or "Extract" for custom pages.',
+    accept: 'application/pdf',
+    multiple: false
   }
 };
 
@@ -141,10 +154,12 @@ function setMode(next) {
   modeMerge.classList.toggle('active', mode === 'merge');
   modePdf2Image.classList.toggle('active', mode === 'pdf2image');
   modeImage2Pdf.classList.toggle('active', mode === 'image2pdf');
+  modeSplit.classList.toggle('active', mode === 'split');
   modeCompress.setAttribute('aria-selected', String(mode === 'compress'));
   modeMerge.setAttribute('aria-selected', String(mode === 'merge'));
   modePdf2Image.setAttribute('aria-selected', String(mode === 'pdf2image'));
   modeImage2Pdf.setAttribute('aria-selected', String(mode === 'image2pdf'));
+  modeSplit.setAttribute('aria-selected', String(mode === 'split'));
 
   fileInput.multiple = ui.multiple;
   fileInput.accept = ui.accept;
@@ -154,6 +169,8 @@ function setMode(next) {
   mergeOptions.classList.toggle('hidden', mode !== 'merge');
   imageOptions.classList.toggle('hidden', mode !== 'pdf2image');
   imagepdfOptions.classList.toggle('hidden', mode !== 'image2pdf');
+  splitOptions.classList.toggle('hidden', mode !== 'split');
+  if (splitPagesRow) splitPagesRow.classList.toggle('hidden', mode !== 'split' || splitMode.value !== 'extract');
 
   // Reset any selection from the previous mode.
   currentFile = null;
@@ -338,7 +355,7 @@ async function handleFiles(files) {
     return;
   }
 
-  if (mode === 'compress' || mode === 'pdf2image') {
+  if (mode === 'compress' || mode === 'pdf2image' || mode === 'split') {
     const file = files[0];
     if (!(await isPdfByContent(file))) {
       setStatus('The selected file is not a valid PDF (missing the %PDF- header).', 'error');
@@ -352,11 +369,20 @@ async function handleFiles(files) {
     dropText.textContent = 'Change PDF';
     compressBtn.disabled = false;
     hideResult();
-    setStatus(
-      mode === 'compress'
-        ? 'PDF ready. Choose a preset and click "Compress PDF".'
-        : 'PDF ready. Choose a format and click "Convert to Images".'
-    );
+    if (mode === 'split') {
+      const m = splitMode ? splitMode.value : 'individual';
+      setStatus(
+        m === 'extract'
+          ? 'PDF ready. Enter pages (e.g. 1-3, 5) and click "Split PDF".'
+          : 'PDF ready. Click "Split PDF" to get each page as a separate PDF (ZIP).'
+      );
+    } else {
+      setStatus(
+        mode === 'compress'
+          ? 'PDF ready. Choose a preset and click "Compress PDF".'
+          : 'PDF ready. Choose a format and click "Convert to Images".'
+      );
+    }
     return;
   }
 
@@ -425,6 +451,12 @@ modeCompress.addEventListener('click', () => setMode('compress'));
 modeMerge.addEventListener('click', () => setMode('merge'));
 modePdf2Image.addEventListener('click', () => setMode('pdf2image'));
 modeImage2Pdf.addEventListener('click', () => setMode('image2pdf'));
+modeSplit.addEventListener('click', () => setMode('split'));
+if (splitMode) {
+  splitMode.addEventListener('change', () => {
+    if (splitPagesRow) splitPagesRow.classList.toggle('hidden', splitMode.value !== 'extract');
+  });
+}
 
 // ---- ZIP writer (store method, no compression) ------------------------------
 
@@ -749,6 +781,90 @@ async function onImage2Pdf() {
   }
 }
 
+function renderSplitResult(result, baseName) {
+  revokeBlobUrls();
+  if (result.parts && result.parts.length > 0) {
+    // Individual pages → show ZIP + list
+    imageGrid.classList.remove('hidden');
+    imageGrid.textContent = '';
+    const urls = result.parts.map((p) => URL.createObjectURL(new Blob([p.bytes], { type: 'application/pdf' })));
+    currentBlobUrls = urls.slice();
+    result.parts.forEach((p, i) => {
+      const cell = document.createElement('a');
+      cell.className = 'image-cell';
+      cell.href = urls[i];
+      cell.download = p.name;
+      cell.title = p.name;
+      const icon = document.createElement('div');
+      icon.textContent = '📄';
+      icon.style.fontSize = '32px';
+      const label = document.createElement('span');
+      label.textContent = p.name;
+      cell.appendChild(icon);
+      cell.appendChild(label);
+      imageGrid.appendChild(cell);
+    });
+    const zipBlob = buildZip(result.parts.map((p) => ({ name: p.name, bytes: p.bytes })));
+    const zipUrl = URL.createObjectURL(zipBlob);
+    currentBlobUrls.push(zipUrl);
+    zipLink.href = zipUrl;
+    zipLink.download = `${sanitizeFileName(baseName)}-split.zip`;
+    zipLink.textContent = `Download all (${result.parts.length} PDFs, ZIP)`;
+    zipLink.classList.remove('hidden');
+    downloadLink.classList.add('hidden');
+  } else {
+    bindSingleDownload(result, `${sanitizeFileName(baseName)}-extract.pdf`);
+  }
+}
+
+async function onSplit() {
+  if (!currentFile) return;
+  const selMode = splitMode ? splitMode.value : 'individual';
+  const pagesStr = splitPages ? splitPages.value.trim() : '';
+  if (selMode === 'extract' && !pagesStr) {
+    setStatus('Enter pages to extract, e.g. "1-3, 5"', 'error');
+    return;
+  }
+  setBusy(selMode === 'individual' ? 'Splitting PDF…' : 'Extracting pages…');
+  const buffer = await currentFile.arrayBuffer();
+  try {
+    const result = await splitPdf({
+      file: buffer,
+      mode: selMode,
+      pages: pagesStr,
+      transfer: true,
+      onProgress
+    });
+    if (result.parts) {
+      renderSplitResult(result, currentFile.name);
+      resultTitle.textContent = `Split into ${result.count} page${result.count === 1 ? '' : 's'}`;
+      resultOutputLabel.textContent = 'Parts';
+      resultSavedLabel.textContent = 'Pages';
+      originalSizeEl.textContent = formatBytes(result.originalSize);
+      compressedSizeEl.textContent = formatBytes(result.compressedSize);
+      savingsEl.textContent = `${result.count}`;
+      processingNoteEl.textContent = `Split in ${result.processingTimeMs} ms.`;
+    } else {
+      bindSingleDownload(result, `${sanitizeFileName(currentFile.name)}-extract.pdf`);
+      resultTitle.textContent = 'Done';
+      resultOutputLabel.textContent = 'Extracted';
+      resultSavedLabel.textContent = 'Pages';
+      originalSizeEl.textContent = formatBytes(result.originalSize);
+      compressedSizeEl.textContent = formatBytes(result.compressedSize);
+      savingsEl.textContent = `${result.count} pages`;
+      processingNoteEl.textContent = `Extracted ${result.count} page(s) in ${result.processingTimeMs} ms.`;
+    }
+    // Hide image grid handling for single file case is inside render/bind
+    if (!result.parts) imageGrid.classList.add('hidden');
+    showResult();
+    setStatus('', 'success');
+  } catch (err) {
+    setStatus(`Split failed: ${err.message}`, 'error');
+  } finally {
+    resetBusy();
+  }
+}
+
 compressBtn.addEventListener('click', () => {
   if (mode === 'compress') {
     onCompress();
@@ -756,6 +872,8 @@ compressBtn.addEventListener('click', () => {
     onMerge();
   } else if (mode === 'pdf2image') {
     onPdf2Image();
+  } else if (mode === 'split') {
+    onSplit();
   } else {
     onImage2Pdf();
   }

@@ -178,6 +178,7 @@ function handleWorkerMessage(data) {
         job.resolve({
           bytes: data.bytes,
           images: data.images,
+          parts: data.parts,
           count: data.count,
           originalSize: data.originalSize,
           compressedSize: data.compressedSize,
@@ -518,6 +519,71 @@ export function imagesToPdf(options) {
         images,
         options: { pageSize: pageSize || 'auto', fit: fit !== false, quality: q }
       },
+      transferList
+    );
+  });
+}
+
+/**
+ * Split a PDF into multiple PDFs or extract a page range entirely in the
+ * browser. Two modes:
+ *  - "individual": each page becomes a separate PDF (returned as `parts`)
+ *  - "extract": extract the pages described by `pages` (e.g. "1-3,5") into
+ *    a single PDF (returned as `bytes`)
+ *
+ * @param {object} options
+ * @param {ArrayBuffer} options.file     PDF bytes
+ * @param {'individual'|'extract'} [options.mode='individual']
+ * @param {string} [options.pages]       page ranges for "extract", e.g. "1-3, 5"
+ * @param {(stage: string, message: string, progress: object) => void} [options.onProgress]
+ * @param {boolean} [options.transfer=true]
+ * @returns {Promise<{
+ *   bytes?: Uint8Array,
+ *   parts?: Array<{ name: string, bytes: Uint8Array }>,
+ *   count: number,
+ *   originalSize: number,
+ *   compressedSize: number,
+ *   processingTimeMs: number
+ * }>}
+ */
+export function splitPdf(options) {
+  const { file, mode, pages, onProgress, transfer } = options || {};
+
+  if (!file || !(file instanceof ArrayBuffer)) {
+    return Promise.reject(
+      Object.assign(new Error('splitPdf: file must be an ArrayBuffer'), { code: 'INVALID_FILE' })
+    );
+  }
+  if (!hasPdfSignature(file)) {
+    return Promise.reject(
+      Object.assign(new Error('splitPdf: the file is not a valid PDF (missing the %PDF- header)'), { code: 'INVALID_PDF' })
+    );
+  }
+  const m = mode || 'individual';
+  if (m !== 'individual' && m !== 'extract') {
+    return Promise.reject(
+      Object.assign(new Error(`splitPdf: unknown mode "${m}"`), { code: 'INVALID_SPLIT_MODE' })
+    );
+  }
+  if (m === 'extract' && (!pages || String(pages).trim() === '')) {
+    return Promise.reject(
+      Object.assign(new Error('splitPdf: pages is required for extract mode, e.g. "1-3, 5"'), { code: 'INVALID_PAGE_RANGE' })
+    );
+  }
+  if (file.byteLength > MAX_SAFE_INPUT_BYTES) {
+    return Promise.reject(
+      Object.assign(new Error(`splitPdf: file is ${(file.byteLength / 1024 / 1024).toFixed(1)} MB; limit is ${MAX_SAFE_INPUT_BYTES / 1024 / 1024} MB`), { code: 'FILE_TOO_LARGE' })
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    const id = generateId();
+    activeJobs.set(id, { resolve, reject, onProgress });
+
+    const w = ensureWorker();
+    const transferList = transfer === false ? undefined : [file];
+    w.postMessage(
+      { type: 'split', id, file, options: { mode: m, pages: pages || '' } },
       transferList
     );
   });
