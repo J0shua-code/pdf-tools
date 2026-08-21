@@ -1,0 +1,5 @@
+name = "pdf-tools"
+
+[site]
+src = "web"
+framework = "none"
