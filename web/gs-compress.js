@@ -70,17 +70,40 @@ function hasPdfSignature(buffer) {
 }
 
 function createWorker() {
-  const w = new Worker('./ghostscript.worker.js', { type: 'classic' });
+  // Resolve the worker path relative to this module so that
+  // ad‑blockers / extensions can’t rewrite it to a third‑party domain.
+  const workerScript = new URL('../worker/ghostscript.worker.js', import.meta.url);
 
-  w.onmessage = (event) => {
-    handleWorkerMessage(event.data);
-  };
+  // First attempt: the resolved path.
+  let w = new Worker(workerScript, { type: 'classic' });
 
+  // Fallback attempt: if the first URL fails, try the bare name.
+  // Some extensions strip the ../ prefix; falling back increases compatibility.
   w.onerror = (event) => {
+    // If we already tried the relative path, skip the fallback.
+    if (w.url === workerScript.href) {
+      // Re‑create with the fallback URL.
+      const fallback = new URL('ghostscript.worker.js', import.meta.url);
+      w = new Worker(fallback, { type: 'classic' });
+      w.onmessage = (event) => {
+        handleWorkerMessage(event.data);
+      };
+      w.onerror = (event) => {
+        const err = new Error(event.message || 'Worker crashed unexpectedly');
+        err.code = 'WORKER_CRASH';
+        failAllJobs(err);
+        terminateWorker();
+      };
+      return;
+    }
     const err = new Error(event.message || 'Worker crashed unexpectedly');
     err.code = 'WORKER_CRASH';
     failAllJobs(err);
     terminateWorker();
+  };
+
+  w.onmessage = (event) => {
+    handleWorkerMessage(event.data);
   };
 
   return w;
