@@ -766,11 +766,49 @@ window.addEventListener('beforeunload', revokeBlobUrls);
 
 // ---- PWA & Theme Switcher --------------------------------------------------
 
-// Service Worker Registration
+// Service Worker Registration & PWA Update Notification Popup
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch((err) => {
+    navigator.serviceWorker.register('./sw.js').then((reg) => {
+      // Check for SW updates whenever app comes into focus
+      window.addEventListener('focus', () => reg.update());
+
+      function promptUpdate(waitingWorker) {
+        const updateToast = document.getElementById('update-toast');
+        const updateBtn = document.getElementById('update-toast-btn');
+        if (updateToast && updateBtn) {
+          updateToast.classList.remove('hidden');
+          updateBtn.addEventListener('click', () => {
+            updateBtn.disabled = true;
+            updateBtn.textContent = 'Updating…';
+            waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+          });
+        }
+      }
+
+      if (reg.waiting) {
+        promptUpdate(reg.waiting);
+      }
+
+      reg.addEventListener('updatefound', () => {
+        const installingWorker = reg.installing;
+        if (!installingWorker) return;
+        installingWorker.addEventListener('statechange', () => {
+          if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            promptUpdate(installingWorker);
+          }
+        });
+      });
+    }).catch((err) => {
       console.warn('Service worker registration failed:', err);
+    });
+
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!refreshing) {
+        refreshing = true;
+        window.location.reload();
+      }
     });
   });
 }
