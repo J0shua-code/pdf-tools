@@ -4,24 +4,14 @@
  * Cloudflare serves `web/index.html` as the site root.
  */
 import { defineConfig } from 'vite'
-import copy from 'rollup-plugin-copy'
 
 export default defineConfig({
-  base: '/',
+  base: './',
   build: {
-    outDir: 'web',
-    emptyOutDir: true,
+    outDir: 'dist',
+    emptyOutDir: false,
     rollupOptions: {
       input: 'web/index.html',
     },
   },
-  plugins: [
-    copy({
-      targets: [
-        { src: 'worker/ghostscript.worker.js', dest: 'web' }
-      ]
-    })
-  ]
 })
-
-/

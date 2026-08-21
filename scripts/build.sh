@@ -175,5 +175,14 @@ cp "${PROJECT_ROOT}/shared/presets.js" "${DIST_DIR}/presets.js"
 # Copy the image->PDF writer (loaded by the worker via importScripts).
 cp "${PROJECT_ROOT}/shared/pdf-writer.js" "${DIST_DIR}/pdf-writer.js"
 
-echo "Build complete. Artifacts in ${DIST_DIR}:"
+# Copy all runtime artifacts into web/ so web/ is self-contained for static serve & Cloudflare Pages.
+mkdir -p "${PROJECT_ROOT}/web"
+cp "${DIST_DIR}/ghostscript.js" "${PROJECT_ROOT}/web/ghostscript.js"
+cp "${DIST_DIR}/ghostscript.wasm" "${PROJECT_ROOT}/web/ghostscript.wasm"
+cp "${PROJECT_ROOT}/worker/ghostscript.worker.js" "${PROJECT_ROOT}/web/ghostscript.worker.js"
+cp "${PROJECT_ROOT}/shared/presets.js" "${PROJECT_ROOT}/web/presets.js"
+cp "${PROJECT_ROOT}/shared/pdf-writer.js" "${PROJECT_ROOT}/web/pdf-writer.js"
+
+echo "Build complete. Artifacts in ${DIST_DIR} and ${PROJECT_ROOT}/web:"
 ls -lh "${DIST_DIR}"
+

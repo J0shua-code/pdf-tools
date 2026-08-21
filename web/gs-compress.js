@@ -70,43 +70,73 @@ function hasPdfSignature(buffer) {
 }
 
 function createWorker() {
-  // Resolve the worker path relative to this module so that
-  // ad‑blockers / extensions can’t rewrite it to a third‑party domain.
-  const workerScript = new URL('../worker/ghostscript.worker.js', import.meta.url);
+  // Candidate worker script URLs:
+  // 1. Co-located with this module (production / bundled build)
+  // 2. Relative to the current document (site root)
+  // 3. Source relative path (unbundled dev mode)
+  const candidateUrls = [
+    new URL('ghostscript.worker.js', import.meta.url),
+    new URL('./ghostscript.worker.js', typeof window !== 'undefined' && window.location ? window.location.href : import.meta.url),
+    new URL('../worker/ghostscript.worker.js', import.meta.url)
+  ];
 
-  // First attempt: the resolved path.
-  let w = new Worker(workerScript, { type: 'classic' });
-
-  // Fallback attempt: if the first URL fails, try the bare name.
-  // Some extensions strip the ../ prefix; falling back increases compatibility.
-  w.onerror = (event) => {
-    // If we already tried the relative path, skip the fallback.
-    if (w.url === workerScript.href) {
-      // Re‑create with the fallback URL.
-      const fallback = new URL('ghostscript.worker.js', import.meta.url);
-      w = new Worker(fallback, { type: 'classic' });
-      w.onmessage = (event) => {
-        handleWorkerMessage(event.data);
-      };
-      w.onerror = (event) => {
-        const err = new Error(event.message || 'Worker crashed unexpectedly');
-        err.code = 'WORKER_CRASH';
-        failAllJobs(err);
-        terminateWorker();
-      };
-      return;
+  const uniqueUrls = [];
+  const seen = new Set();
+  for (const url of candidateUrls) {
+    if (!seen.has(url.href)) {
+      seen.add(url.href);
+      uniqueUrls.push(url);
     }
-    const err = new Error(event.message || 'Worker crashed unexpectedly');
-    err.code = 'WORKER_CRASH';
-    failAllJobs(err);
-    terminateWorker();
-  };
+  }
 
-  w.onmessage = (event) => {
-    handleWorkerMessage(event.data);
-  };
+  let attemptIndex = 0;
 
-  return w;
+  function tryNextWorker() {
+    if (attemptIndex >= uniqueUrls.length) {
+      const err = new Error('Failed to load ghostscript worker script from any candidate path');
+      err.code = 'WORKER_CRASH';
+      failAllJobs(err);
+      terminateWorker();
+      return null;
+    }
+
+    const workerUrl = uniqueUrls[attemptIndex++];
+    let w;
+    let hasInitialized = false;
+
+    try {
+      w = new Worker(workerUrl, { type: 'classic' });
+    } catch (err) {
+      return tryNextWorker();
+    }
+
+    w.onerror = (event) => {
+      if (!hasInitialized) {
+        w.terminate();
+        if (worker === w) {
+          worker = null;
+        }
+        const nextWorker = tryNextWorker();
+        if (nextWorker) {
+          worker = nextWorker;
+        }
+        return;
+      }
+      const err = new Error(event.message || 'Worker crashed unexpectedly');
+      err.code = 'WORKER_CRASH';
+      failAllJobs(err);
+      terminateWorker();
+    };
+
+    w.onmessage = (event) => {
+      hasInitialized = true;
+      handleWorkerMessage(event.data);
+    };
+
+    return w;
+  }
+
+  return tryNextWorker();
 }
 
 function ensureWorker() {
