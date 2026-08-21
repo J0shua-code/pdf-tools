@@ -12,7 +12,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { loadModule, getPresets, compressBytes, mergeBytes, buildImagesPdf, pdfToImageBytes, isValidPdf, extractText, tokenContainment } from './helpers.js';
+import { loadModule, getPresets, compressBytes, mergeBytes, buildImagesPdf, pdfToImageBytes, isValidPdf, extractText, tokenContainment, splitPdfIndividual, extractPdfPages } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -214,6 +214,35 @@ async function run() {
     } catch (err) {
       failures++;
       console.error(`✗ image->PDF round trip: ${err.message}`);
+    }
+  }
+
+  // Split: individual pages and extract range
+  {
+    const simple = await fs.readFile(path.join(INPUT_DIR, 'simple.pdf'));
+    const images = await fs.readFile(path.join(INPUT_DIR, 'images.pdf'));
+    const merged = await mergeBytes(module, [simple, images]);
+    if (merged.code !== 0) {
+      failures++;
+      console.error('✗ split: could not create multi-page source');
+    } else {
+      try {
+        const parts = await splitPdfIndividual(module, merged.bytes);
+        if (parts.length < 2) throw new Error(`expected >=2 parts, got ${parts.length}`);
+        for (const p of parts) if (!isValidPdf(p.bytes)) throw new Error(`part ${p.name} not valid PDF`);
+        console.log(`✓ split individual: ${parts.length} parts`);
+      } catch (err) {
+        failures++;
+        console.error(`✗ split individual: ${err.message}`);
+      }
+      try {
+        const extracted = await extractPdfPages(module, merged.bytes, '1');
+        if (!isValidPdf(extracted)) throw new Error('extracted not valid PDF');
+        console.log('✓ split extract (page 1): ok');
+      } catch (err) {
+        failures++;
+        console.error(`✗ split extract: ${err.message}`);
+      }
     }
   }
 

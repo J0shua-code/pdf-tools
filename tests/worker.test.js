@@ -485,6 +485,86 @@ async function run() {
       assert(isValidPdf(mergeJob.result.bytes), 'output should be a valid merged PDF');
       assert(mergeJob.result.fileCount === 2, 'should contain 2 merged files');
     });
+
+    await check('splits a PDF into individual pages (ZIP parts)', async () => {
+      const toBuf = (b) => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
+      const images = await fs.readFile(path.join(INPUT_DIR, 'images.pdf'));
+      const { result: merged } = await runJob(worker, {
+        type: 'merge',
+        id: 'job-split-src',
+        files: [toBuf(simple), toBuf(images)],
+        options: {}
+      });
+      assert(merged.success === true, 'merge for split source should succeed');
+      const { result } = await runJob(worker, {
+        type: 'split',
+        id: 'job-split-ind',
+        file: merged.bytes.buffer.slice(merged.bytes.byteOffset, merged.bytes.byteOffset + merged.bytes.byteLength),
+        options: { mode: 'individual' }
+      });
+      assert(result.success === true, 'split individual should succeed');
+      assert(Array.isArray(result.parts) && result.parts.length >= 2, 'should return >=2 parts');
+      for (const p of result.parts) {
+        assert(isValidPdf(p.bytes), `part ${p.name} should be a valid PDF`);
+        assert(p.name.startsWith('page-') && p.name.endsWith('.pdf'), 'part name shape');
+      }
+      assert(result.count === result.parts.length, 'count should match parts length');
+    });
+
+    await check('extracts a page range into a single PDF', async () => {
+      const toBuf = (b) => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
+      const images = await fs.readFile(path.join(INPUT_DIR, 'images.pdf'));
+      const { result: merged } = await runJob(worker, {
+        type: 'merge',
+        id: 'job-extract-src',
+        files: [toBuf(simple), toBuf(images)],
+        options: {}
+      });
+      assert(merged.success === true, 'merge for extract source should succeed');
+      const { result } = await runJob(worker, {
+        type: 'split',
+        id: 'job-split-extract',
+        file: merged.bytes.buffer.slice(merged.bytes.byteOffset, merged.bytes.byteOffset + merged.bytes.byteLength),
+        options: { mode: 'extract', pages: '1' }
+      });
+      assert(result.success === true, 'extract should succeed');
+      assert(isValidPdf(result.bytes), 'extracted bytes should be a valid PDF');
+      assert(result.count === 1, 'extract count should be 1');
+    });
+
+    await check('rejects split with unknown mode gracefully', async () => {
+      const { result } = await runJob(worker, {
+        type: 'split',
+        id: 'job-split-badmode',
+        file: toArrayBuffer(simple),
+        options: { mode: 'garbage' }
+      });
+      assert(result.success === false, 'success should be false');
+      assert(result.code === 'INVALID_SPLIT_MODE', 'code should be INVALID_SPLIT_MODE');
+    });
+
+    await check('rejects split extract with invalid page range gracefully', async () => {
+      const { result } = await runJob(worker, {
+        type: 'split',
+        id: 'job-split-badrange',
+        file: toArrayBuffer(simple),
+        options: { mode: 'extract', pages: 'abc' }
+      });
+      assert(result.success === false, 'success should be false');
+      assert(result.code === 'INVALID_PAGE_RANGE', 'code should be INVALID_PAGE_RANGE');
+    });
+
+    await check('rejects split with non-PDF file gracefully', async () => {
+      const garbage = new TextEncoder().encode('not a pdf').buffer;
+      const { result } = await runJob(worker, {
+        type: 'split',
+        id: 'job-split-notpdf',
+        file: garbage,
+        options: { mode: 'individual' }
+      });
+      assert(result.success === false, 'success should be false');
+      assert(result.code === 'INVALID_PDF', 'code should be INVALID_PDF');
+    });
   } finally {
     worker.terminate();
   }

@@ -233,6 +233,56 @@ export function buildImagesPdf(jpegBytesList, options = {}) {
   return PDF_WRITER.writePdf(images, { w: size.w, h: size.h, fit: options.fit !== false });
 }
 
+export async function splitPdfIndividual(module, inputBytes) {
+  const jobId = Math.random().toString(36).slice(2);
+  const workDir = `/work/split-${jobId}`;
+  const inPath = `${workDir}/in.pdf`;
+  const outPattern = `${workDir}/page-%d.pdf`;
+  const FS = module.FS;
+  const made = [];
+  try {
+    FS.mkdirTree(workDir);
+    FS.writeFile(inPath, inputBytes);
+    const run = module.cwrap('gs_run', 'number', ['string', 'string', 'string']);
+    const code = run(inPath, outPattern, '');
+    if (code !== 0) throw new Error(`gs_run split failed with code ${code}`);
+    const pageFiles = FS.readdir(workDir)
+      .filter((n) => /^page-\d+\.pdf$/.test(n))
+      .sort((a, b) => parseInt(a.match(/\d+/)[0], 10) - parseInt(b.match(/\d+/)[0], 10));
+    const parts = pageFiles.map((name) => {
+      const p = `${workDir}/${name}`;
+      made.push(p);
+      return { name: `page-${String(parseInt(name.match(/\d+/)[0], 10)).padStart(3, '0')}.pdf`, bytes: FS.readFile(p) };
+    });
+    return parts;
+  } finally {
+    for (const p of made) { try { FS.unlink(p); } catch {} }
+    try { FS.unlink(inPath); } catch {}
+    try { FS.rmdir(workDir); } catch {}
+  }
+}
+
+export async function extractPdfPages(module, inputBytes, pages) {
+  const jobId = Math.random().toString(36).slice(2);
+  const workDir = `/work/extract-${jobId}`;
+  const inPath = `${workDir}/in.pdf`;
+  const outPath = `${workDir}/out.pdf`;
+  const FS = module.FS;
+  try {
+    FS.mkdirTree(workDir);
+    FS.writeFile(inPath, inputBytes);
+    const run = module.cwrap('gs_run', 'number', ['string', 'string', 'string']);
+    // Use -sPageList for Ghostscript (supports 1,3,5-7 etc.)
+    const code = run(inPath, outPath, `-sPageList=${pages}`);
+    if (code !== 0) throw new Error(`gs_run extract failed with code ${code}`);
+    return FS.readFile(outPath);
+  } finally {
+    try { FS.unlink(inPath); } catch {}
+    try { FS.unlink(outPath); } catch {}
+    try { FS.rmdir(workDir); } catch {}
+  }
+}
+
 export function isValidPdf(bytes) {
   if (!bytes || bytes.length < 8) return false;
   const magic = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3], bytes[4]);

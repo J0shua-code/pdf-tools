@@ -20,7 +20,7 @@ class FakeWorker {
 }
 globalThis.Worker = FakeWorker;
 
-const { compressPDF, mergePDFs, pdfToImages, imagesToPdf, dispose } =
+const { compressPDF, mergePDFs, pdfToImages, imagesToPdf, splitPdf, dispose } =
   await import('../web/gs-compress.js');
 
 let failures = 0;
@@ -117,6 +117,23 @@ async function run() {
     mergePDFs({ files: [fakePdf(), fakePdf()], transfer: false }).catch(() => {});
     const { transfer } = lastSent();
     assert(transfer === undefined, 'transfer should be undefined when transfer=false');
+  });
+
+  await check('splitPdf individual sends a valid payload and transfer list', async () => {
+    splitPdf({ file: fakePdf(), mode: 'individual', transfer: true }).catch(() => {});
+    const { message, transfer } = lastSent();
+    assert(message.type === 'split', 'message type should be split');
+    assert(message.file instanceof ArrayBuffer, 'message.file should be an ArrayBuffer');
+    assert(message.options.mode === 'individual', 'mode should pass through');
+    assertTransferables(transfer, 1);
+  });
+
+  await check('splitPdf extract sends pages', async () => {
+    splitPdf({ file: fakePdf(), mode: 'extract', pages: '1-3,5', transfer: true }).catch(() => {});
+    const { message } = lastSent();
+    assert(message.type === 'split', 'message type should be split');
+    assert(message.options.mode === 'extract', 'mode should be extract');
+    assert(message.options.pages === '1-3,5', 'pages should pass through');
   });
 
   dispose();
