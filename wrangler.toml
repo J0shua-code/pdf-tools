@@ -1,5 +1,5 @@
 name = "pdf-tools"
 
 [site]
-src = "web"
+src = "."
 framework = "none"
