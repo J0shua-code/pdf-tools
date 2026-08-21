@@ -48,18 +48,23 @@ jobs:
         if: steps.gs.outputs.update_available == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          TITLE: "Ghostscript update available: Current: ${{ steps.gs.outputs.current_version }} Latest: ${{ steps.gs.outputs.latest }}"
+          CURRENT_VER: ${{ steps.gs.outputs.current_version }}
+          CURRENT_TAG: ${{ steps.gs.outputs.current_tag }}
+          LATEST_TAG: ${{ steps.gs.outputs.latest }}
         run: |
-          TITLE="Ghostscript update available: Current: ${{ steps.gs.outputs.current_version }} Latest: ${{ steps.gs.outputs.latest }}"
+          BODY="A newer official Ghostscript release is available.
+
+          - Current (pinned in versions.env): ${CURRENT_VER} (${CURRENT_TAG})
+          - Latest upstream: ${LATEST_TAG}
+
+          Update versions.env (GHOSTSCRIPT_VERSION / GHOSTSCRIPT_TAG / checksum), re-validate the build with bash scripts/test.sh, run the benchmark, then bump the package version. Do not publish without passing tests."
+
           # Avoid duplicate issues for the same upstream release.
           if gh issue list --search "\"Ghostscript update available\"" --state open --json number --jq 'length' | grep -q '^0$'; then
             gh issue create \
               --title "$TITLE" \
-              --body "A newer official Ghostscript release is available.
-
-- **Current (pinned in versions.env):** ${{ steps.gs.outputs.current_version }} (${{ steps.gs.outputs.current_tag }})
-- **Latest upstream:** ${{ steps.gs.outputs.latest }}
-
-Update \`versions.env\` (GHOSTSCRIPT_VERSION / GHOSTSCRIPT_TAG / checksum), re-validate the build with \`bash scripts/test.sh\`, run the benchmark, then bump the package version. Do not publish without passing tests."
+              --body "$BODY"
           else
             echo "Issue already open for a Ghostscript update; skipping."
           fi
