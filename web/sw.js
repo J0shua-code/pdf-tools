@@ -1,5 +1,5 @@
- const CACHE_NAME = 'pdf-tools-__BUILD_ID__';
- const V = '__BUILD_ID__';
+ const CACHE_NAME = 'pdf-tools-v7-split';
+ const V = 'v7-split';
  const ASSETS_TO_CACHE = [
   './',
   './index.html?v=${V}',
