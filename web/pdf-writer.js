@@ -1,22 +1,5 @@
 /*
  * Minimal PDF 1.4 writer used for image -> PDF conversion.
- *
- * Each image is embedded as a JPEG image XObject (/Filter /DCTDecode), the
- * standard, lossless way to put a JPEG inside a PDF. Non-JPEG images are
- * converted to JPEG by the caller (worker canvas) before reaching this
- * writer, so every stream here is DCTDecode.
- *
- * Plain script (no ESM) so it works in BOTH environments:
- *
- *   - Classic web worker: loaded with importScripts('./pdf-writer.js');
- *     exposes the bundle as a global `PDF_WRITER`.
- *   - Node (tests/scripts): importing it as a module executes it and sets
- *     `globalThis.PDF_WRITER` (the package is "type": "module").
- *
- * This writer intentionally does NOT use Ghostscript: the PS `image`
- * operator and the DCTDecode PostScript filter are not functional in the
- * WASM library build, but the PDF interpreter reads DCTDecode streams
- * perfectly well (see tests/integration.test.js round-trip).
  */
 
 (function (root) {
@@ -42,7 +25,6 @@
     return out;
   }
 
-  /* Fixed-point formatting without trailing zeros: 0.5 -> "0.5", 1 -> "1". */
   function num(value) {
     if (!Number.isFinite(value)) return '0';
     const rounded = Math.round(Math.abs(value) * 10000) / 10000;
@@ -59,17 +41,6 @@
     return '/DeviceRGB';
   }
 
-  /**
-   * Build a PDF whose pages each contain one image, centered and (by
-   * default) scaled to fit the page.
-   *
-   * @param {Array<{jpeg: Uint8Array, width: number, height: number, components: number}>} images
-   * @param {object} [options]
-   * @param {number} [options.w]  page width in points (0/absent = image size)
-   * @param {number} [options.h]  page height in points (0/absent = image size)
-   * @param {boolean} [options.fit=true] scale the image to fit the page
-   * @returns {Uint8Array} the PDF bytes
-   */
   function writePdf(images, options) {
     if (!Array.isArray(images) || images.length < 1) {
       throw new Error('writePdf: at least one image is required');
@@ -120,7 +91,6 @@
       const contentId = nextId++;
       const pageId = nextId++;
 
-      // Image XObject (raw JPEG passthrough).
       emit(xobjId, [
         latin1(
           `${xobjId} 0 obj\n` +
@@ -132,16 +102,16 @@
         latin1('\nendstream\nendobj\n')
       ]);
 
-      // Page content stream: center + scale the image, then paint it.
+      const drawnW = imgW * scale;
+      const drawnH = imgH * scale;
       const content =
-        `q\n${num(scale)} 0 0 ${num(scale)} ${num(ox)} ${num(oy)} cm\n/Im${i} Do\nQ\n`;
+        `q\n${num(drawnW)} 0 0 ${num(drawnH)} ${num(ox)} ${num(oy)} cm\n/Im${i} Do\nQ\n`;
       emit(contentId, [
         latin1(`${contentId} 0 obj\n<< /Length ${content.length} >>\nstream\n`),
         latin1(content),
         latin1('endstream\nendobj\n')
       ]);
 
-      // Page object.
       emit(pageId, [
         latin1(
           `${pageId} 0 obj\n` +
@@ -155,7 +125,6 @@
       pageIds.push(pageId);
     }
 
-    // Pages tree.
     emit(pagesId, [
       latin1(
         `${pagesId} 0 obj\n` +
@@ -164,12 +133,10 @@
       )
     ]);
 
-    // Catalog.
     emit(catalogId, [
       latin1(`${catalogId} 0 obj\n<< /Type /Catalog /Pages ${pagesId} 0 R >>\nendobj\n`)
     ]);
 
-    // Cross-reference table + trailer.
     const xrefStart = offset;
     let xref = `xref\n0 ${nextId}\n0000000000 65535 f \n`;
     for (let i = 1; i < nextId; i++) {
@@ -186,7 +153,6 @@
 
   root.PDF_WRITER = bundle;
 
-  // CommonJS consumers (e.g. Node scripts running outside "type": "module").
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = bundle;
   }
