@@ -66,10 +66,10 @@ const MODE_UI = {
     multiple: false
   },
   merge: {
-    buttonText: 'Merge PDFs',
-    dropText: 'Select PDFs, or drag them here',
-    status: 'Select at least two PDFs to merge.',
-    accept: 'application/pdf',
+    buttonText: 'Merge Files',
+    dropText: 'Select PDFs & Images, or drag them here',
+    status: 'Select at least two files (PDFs or Images) to merge.',
+    accept: 'application/pdf,image/png,image/jpeg,image/webp,image/gif,image/bmp',
     multiple: true
   },
   pdf2image: {
@@ -271,6 +271,11 @@ function renderList() {
     grip.textContent = '⠿';
     grip.title = 'Drag to reorder';
 
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    const badge = document.createElement('span');
+    badge.className = `file-list-badge ${isPdf ? 'pdf' : 'img'}`;
+    badge.textContent = isPdf ? 'PDF' : 'IMAGE';
+
     const name = document.createElement('span');
     name.className = 'file-list-name';
     name.textContent = file.name;
@@ -293,6 +298,7 @@ function renderList() {
 
     row.appendChild(idx);
     row.appendChild(grip);
+    row.appendChild(badge);
     row.appendChild(name);
     row.appendChild(size);
     row.appendChild(remove);
@@ -354,14 +360,15 @@ async function handleFiles(files) {
     return;
   }
 
-  // Multi-file modes: merge (PDFs) and image -> PDF (any images).
+  // Multi-file modes: merge (PDFs & images) and image -> PDF (any images).
   let valid = [];
   if (mode === 'merge') {
     for (const file of files) {
-      if (await isPdfByContent(file)) {
+      const isImg = file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp)$/i.test(file.name);
+      if ((await isPdfByContent(file)) || isImg) {
         valid.push(file);
       } else {
-        setStatus(`Skipped "${file.name}": not a valid PDF.`, 'error');
+        setStatus(`Skipped "${file.name}": not a valid PDF or supported image.`, 'error');
       }
     }
   } else {
@@ -370,7 +377,7 @@ async function handleFiles(files) {
 
   if (valid.length === 0) {
     setStatus(
-      mode === 'merge' ? 'No valid PDFs selected.' : 'No images selected.',
+      mode === 'merge' ? 'No valid PDFs or images selected.' : 'No images selected.',
       'error'
     );
     return;
@@ -383,8 +390,8 @@ async function handleFiles(files) {
   setStatus(
     mode === 'merge'
       ? mergeFiles.length < 2
-        ? 'Add at least one more PDF to merge.'
-        : `Ready to merge ${mergeFiles.length} PDFs.`
+        ? 'Add at least one more PDF or image to merge.'
+        : `Ready to merge ${mergeFiles.length} files.`
       : `Ready to create a ${mergeFiles.length}-page PDF.`
   );
 }
@@ -615,16 +622,33 @@ async function onCompress() {
 
 async function onMerge() {
   if (mergeFiles.length < 2) return;
-  setBusy('Merging…');
+  setBusy('Preparing files…');
 
-  const buffers = [];
-  for (const file of mergeFiles) {
-    buffers.push(await file.arrayBuffer());
-  }
-
+  const pdfBuffers = [];
   try {
+    for (let i = 0; i < mergeFiles.length; i++) {
+      const file = mergeFiles[i];
+      const buffer = await file.arrayBuffer();
+      const isPdf = await isPdfByContent(file);
+
+      if (isPdf) {
+        pdfBuffers.push(buffer);
+      } else {
+        setBusy(`Converting image ${i + 1} of ${mergeFiles.length} to PDF…`);
+        const imgResult = await imagesToPdf({
+          images: [buffer],
+          pageSize: selectedPageSize(mergePageSize),
+          fit: mergeFit.checked,
+          transfer: false,
+          onProgress: (stage, msg) => onProgress(stage, `[Image ${i + 1}] ${msg}`)
+        });
+        pdfBuffers.push(imgResult.bytes.buffer);
+      }
+    }
+
+    setBusy('Merging documents…');
     const result = await mergePDFs({
-      files: buffers,
+      files: pdfBuffers,
       pageSize: selectedPageSize(mergePageSize),
       fit: mergeFit.checked,
       transfer: true,
@@ -635,13 +659,12 @@ async function onMerge() {
 
     resultTitle.textContent = 'Done';
     resultOutputLabel.textContent = 'Merged';
-    resultSavedLabel.textContent = 'Size delta';
+    resultSavedLabel.textContent = 'Items Merged';
     originalSizeEl.textContent = formatBytes(result.originalSize);
     compressedSizeEl.textContent = formatBytes(result.compressedSize);
-    const deltaPercent = (result.compressionRatio * 100).toFixed(0);
-    savingsEl.textContent = `${deltaPercent >= 0 ? '+' : ''}${deltaPercent}%`;
+    savingsEl.textContent = `${mergeFiles.length} files`;
     processingNoteEl.textContent =
-      `Merged ${result.fileCount} files in ${result.processingTimeMs} ms.`;
+      `Merged ${mergeFiles.length} files into a ${result.fileCount}-page PDF in ${result.processingTimeMs} ms.`;
 
     showResult();
     setStatus('', 'success');

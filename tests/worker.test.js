@@ -455,6 +455,36 @@ async function run() {
       assert(result.success === false, 'success should be false');
       assert(result.code === 'INVALID_PAGE_SIZE', 'code should be INVALID_PAGE_SIZE');
     });
+
+    await check('converts an image to PDF and merges it with another PDF', async () => {
+      const jpegJob = await runJob(worker, {
+        type: 'toImages',
+        id: 'job-mix-src',
+        file: toArrayBuffer(simple),
+        options: { format: 'jpeg', dpi: 150 }
+      });
+      assert(jpegJob.result.success === true && jpegJob.result.count === 1, 'jpeg source');
+      const jpeg = jpegJob.result.images[0].bytes;
+
+      const imgPdfJob = await runJob(worker, {
+        type: 'imagesToPdf',
+        id: 'job-mix-imgpdf',
+        images: [toArrayBuffer(jpeg)],
+        options: { pageSize: 'a4', fit: true }
+      });
+      assert(imgPdfJob.result.success === true, 'imagesToPdf should succeed');
+
+      const mergeJob = await runJob(worker, {
+        type: 'merge',
+        id: 'job-mix-merge',
+        files: [toArrayBuffer(simple), imgPdfJob.result.bytes.buffer],
+        options: {}
+      });
+
+      assert(mergeJob.result.success === true, 'merge should succeed');
+      assert(isValidPdf(mergeJob.result.bytes), 'output should be a valid merged PDF');
+      assert(mergeJob.result.fileCount === 2, 'should contain 2 merged files');
+    });
   } finally {
     worker.terminate();
   }
