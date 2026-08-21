@@ -183,6 +183,15 @@ cp "${PROJECT_ROOT}/worker/ghostscript.worker.js" "${PROJECT_ROOT}/web/ghostscri
 cp "${PROJECT_ROOT}/shared/presets.js" "${PROJECT_ROOT}/web/presets.js"
 cp "${PROJECT_ROOT}/shared/pdf-writer.js" "${PROJECT_ROOT}/web/pdf-writer.js"
 
+# Copy PWA assets into dist/
+cp "${PROJECT_ROOT}/web/manifest.json" "${DIST_DIR}/manifest.json" 2>/dev/null || true
+cp "${PROJECT_ROOT}/web/sw.js" "${DIST_DIR}/sw.js" 2>/dev/null || true
+cp "${PROJECT_ROOT}/web/icon-192.png" "${DIST_DIR}/icon-192.png" 2>/dev/null || true
+cp "${PROJECT_ROOT}/web/icon-512.png" "${DIST_DIR}/icon-512.png" 2>/dev/null || true
+cp "${PROJECT_ROOT}/web/apple-touch-icon.png" "${DIST_DIR}/apple-touch-icon.png" 2>/dev/null || true
+cp "${PROJECT_ROOT}/web/icon.svg" "${DIST_DIR}/icon.svg" 2>/dev/null || true
+
 echo "Build complete. Artifacts in ${DIST_DIR} and ${PROJECT_ROOT}/web:"
 ls -lh "${DIST_DIR}"
+
 

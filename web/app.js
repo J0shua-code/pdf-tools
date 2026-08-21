@@ -205,16 +205,17 @@ function renderPresets() {
       input.checked = true;
     }
 
-    const text = document.createElement('span');
+    const info = document.createElement('div');
+    info.className = 'preset-info';
     const name = document.createElement('strong');
     name.textContent = preset.label;
     const desc = document.createElement('small');
     desc.textContent = preset.description;
-    text.appendChild(name);
-    text.appendChild(desc);
+    info.appendChild(name);
+    info.appendChild(desc);
 
     label.appendChild(input);
-    label.appendChild(text);
+    label.appendChild(info);
     presetGroup.appendChild(label);
   }
 }
@@ -739,6 +740,71 @@ compressBtn.addEventListener('click', () => {
 
 // Revoke any lingering object URLs when the page is unloaded.
 window.addEventListener('beforeunload', revokeBlobUrls);
+
+// ---- PWA & Theme Switcher --------------------------------------------------
+
+// Service Worker Registration
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch((err) => {
+      console.warn('Service worker registration failed:', err);
+    });
+  });
+}
+
+// PWA Install Prompt
+let deferredPrompt = null;
+const pwaInstallBtn = document.getElementById('pwa-install-btn');
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  if (pwaInstallBtn) {
+    pwaInstallBtn.classList.remove('hidden');
+  }
+});
+
+if (pwaInstallBtn) {
+  pwaInstallBtn.addEventListener('click', async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      pwaInstallBtn.classList.add('hidden');
+    }
+    deferredPrompt = null;
+  });
+}
+
+// Theme Switcher (Light / Dark)
+const themeToggleBtn = document.getElementById('theme-toggle');
+const themeToggleIcon = document.getElementById('theme-toggle-icon');
+const themeToggleText = document.getElementById('theme-toggle-text');
+const themeColorMeta = document.getElementById('theme-color-meta');
+
+function setTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('theme', theme);
+  if (theme === 'dark') {
+    if (themeToggleIcon) themeToggleIcon.textContent = '☀️';
+    if (themeToggleText) themeToggleText.textContent = 'Light';
+    if (themeColorMeta) themeColorMeta.setAttribute('content', '#0B0F17');
+  } else {
+    if (themeToggleIcon) themeToggleIcon.textContent = '🌙';
+    if (themeToggleText) themeToggleText.textContent = 'Dark';
+    if (themeColorMeta) themeColorMeta.setAttribute('content', '#FFFDEB');
+  }
+}
+
+const savedTheme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+setTheme(savedTheme);
+
+if (themeToggleBtn) {
+  themeToggleBtn.addEventListener('click', () => {
+    const current = document.documentElement.getAttribute('data-theme') || 'light';
+    setTheme(current === 'dark' ? 'light' : 'dark');
+  });
+}
 
 // ---- init ----------------------------------------------------------------------
 

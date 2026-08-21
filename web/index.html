@@ -1,21 +1,73 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PDF Tools — in your browser</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>PDF Tools — In Your Browser</title>
+
+  <!-- PWA & Mobile Metadata -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="theme-color" content="#FFFDEB" id="theme-color-meta">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description"
+    content="Compress, merge, and convert PDFs entirely in your browser with Ghostscript WASM. 100% private, 100% offline.">
+
+  <!-- Stylesheet -->
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
-  <main class="container">
-    <h1>PDF Tools</h1>
-    <p class="subtitle">
-      Compress, merge, convert PDFs to images and images to PDFs entirely in your
-      browser with Ghostscript compiled to WebAssembly. Your files are never uploaded.
-    </p>
 
-    <section class="card">
-      <!-- Step 0: pick an action -->
+<body>
+  <div class="container">
+    <!-- Navbar Header -->
+    <header class="navbar">
+      <a href="#" class="brand" aria-label="PDF Tools Home">
+        <div class="brand-icon-wrap">
+          <svg class="brand-icon" viewBox="0 0 24 24">
+            <path
+              d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" />
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-title">PDF Tools</span>
+          <span class="brand-badge">⚡ 100% Offline WASM</span>
+        </div>
+      </a>
+
+      <div class="nav-actions">
+        <!-- Theme Switcher Button -->
+        <button type="button" id="theme-toggle" class="nav-btn" aria-label="Toggle light and dark mode">
+          <span id="theme-toggle-icon">🌙</span>
+          <span id="theme-toggle-text">Dark</span>
+        </button>
+
+        <!-- PWA Install Button (hidden until prompt is ready) -->
+        <button type="button" id="pwa-install-btn" class="nav-btn nav-btn-primary hidden"
+          aria-label="Install app on device">
+          <span>📲</span>
+          <span>Install</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Hero Header -->
+    <section class="hero">
+      <div class="hero-pill">
+        <span>✨ Powered by Ghostscript WebAssembly</span>
+      </div>
+      <h1 class="hero-title">PDF Tools.</h1>
+      <p class="hero-subtitle">
+        Compress, merge, convert PDFs to images and images to PDFs inside your browser. Zero server uploads, zero
+        limits.
+      </p>
+    </section>
+
+    <!-- Main Tool Container Card -->
+    <main class="main-card">
+      <!-- Step 0: Tool Mode Segmented Control -->
       <div class="mode-toggle" role="tablist" aria-label="Choose a tool">
         <button type="button" id="mode-compress" class="mode-btn active" role="tab" aria-selected="true">
           Compress
@@ -31,26 +83,34 @@
         </button>
       </div>
 
-      <!-- Step 1: pick file(s) -->
+      <!-- Step 1: Drop Zone -->
       <div class="drop-zone" id="drop-zone" tabindex="0" role="button" aria-label="Select files">
-        <div class="drop-zone-icon" aria-hidden="true">⬆</div>
-        <span id="drop-text">Select a PDF, or drag it here</span>
+        <div class="drop-icon-circle">
+          <svg class="drop-icon" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+          </svg>
+        </div>
+        <div class="drop-title" id="drop-text">Select a PDF, or drag & drop it here</div>
+        <div class="drop-hint" id="drop-hint">Local processing • Fast & private</div>
         <input type="file" id="file-input" accept="application/pdf" hidden>
       </div>
 
       <!-- File info shown once selected (single-file modes) -->
       <div id="file-info" class="file-info hidden">
-        <div class="file-info-name" id="file-name">-</div>
-        <div class="file-info-size" id="file-size">-</div>
+        <div class="file-info-details">
+          <div class="file-info-name" id="file-name">-</div>
+          <div class="file-info-size" id="file-size">-</div>
+        </div>
       </div>
 
       <!-- File list shown once selected (multi-file modes) -->
       <div id="file-list" class="file-list hidden"></div>
 
-      <!-- Compression preset (compress mode only) -->
+      <!-- Compression preset options -->
       <fieldset class="controls hidden" id="preset-group">
         <legend>Compression preset</legend>
-        <!-- preset radios injected from PRESET_META -->
+        <!-- Injected dynamically in app.js -->
       </fieldset>
 
       <!-- Page size for merging PDFs -->
@@ -63,7 +123,7 @@
             Fit pages to size
           </label>
         </div>
-        <p class="control-hint">Merges the documents onto a uniform page size.</p>
+        <p class="control-hint">Merges documents onto a uniform paper size.</p>
       </fieldset>
 
       <!-- Output format for PDF -> Image -->
@@ -85,24 +145,26 @@
             Fit images to page
           </label>
         </div>
-        <p class="control-hint">"Original size" makes each page exactly the image size.</p>
+        <p class="control-hint">"Original size" uses exact dimensions for each page.</p>
       </fieldset>
 
-      <!-- Step 2: go -->
+      <!-- Action Button -->
       <button id="compress-btn" class="compress-btn" disabled>Compress PDF</button>
 
-      <!-- Progress -->
+      <!-- Progress indicator -->
       <div id="progress" class="progress hidden" aria-live="polite">
         <span class="spinner" aria-hidden="true"></span>
-        <span id="progress-text">Loading…</span>
+        <span id="progress-text">Loading Ghostscript engine…</span>
       </div>
 
-      <!-- Status / error -->
-      <div id="status" class="status" aria-live="polite"></div>
+      <!-- Status message -->
+      <div id="status" class="status" aria-live="polite">Select a PDF to begin.</div>
 
-      <!-- Results -->
+      <!-- Results section -->
       <div id="result" class="result hidden">
-        <h2 id="result-title">Done</h2>
+        <div class="result-header">
+          <h2 id="result-title" class="result-title">Done</h2>
+        </div>
         <div class="result-grid">
           <div class="result-cell">
             <span class="result-label">Original</span>
@@ -128,14 +190,20 @@
           </a>
         </div>
       </div>
-    </section>
+    </main>
 
-    <footer class="privacy">
-      <strong>Privacy:</strong> all processing happens locally via a Web Worker.
-      Nothing is sent to any server.
+    <!-- Privacy Footer -->
+    <footer class="footer">
+      <svg class="footer-shield" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round"
+          d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+      </svg>
+      <span><strong>100% Private:</strong> All processing happens locally inside a Web Worker. Files never leave your
+        browser.</span>
     </footer>
-  </main>
+  </div>
 
   <script type="module" src="app.js"></script>
 </body>
+
 </html>

@@ -20,7 +20,11 @@ const MIME_TYPES = {
   '.js': 'text/javascript',
   '.css': 'text/css',
   '.wasm': 'application/wasm',
-  '.pdf': 'application/pdf'
+  '.pdf': 'application/pdf',
+  '.json': 'application/json',
+  '.webmanifest': 'application/manifest+json',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png'
 };
 
 async function serveFile(res, filePath) {

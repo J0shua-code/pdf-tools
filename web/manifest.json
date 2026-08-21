@@ -1,0 +1,30 @@
+{
+  "name": "PDF Tools — In Your Browser",
+  "short_name": "PDF Tools",
+  "description": "Compress, merge, and convert PDFs entirely offline in your browser with Ghostscript WASM.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#FFFDEB",
+  "theme_color": "#FFFDEB",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
