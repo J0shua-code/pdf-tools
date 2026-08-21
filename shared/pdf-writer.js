@@ -132,9 +132,13 @@
         latin1('\nendstream\nendobj\n')
       ]);
 
-      // Page content stream: center + scale the image, then paint it.
+      // Page content stream: position + scale the image, then paint it.
+      // PDF image XObjects are mapped into a 1×1 unit square, so the cm
+      // matrix must specify the full rendered width and height in points.
+      const rw = imgW * scale;
+      const rh = imgH * scale;
       const content =
-        `q\n${num(scale)} 0 0 ${num(scale)} ${num(ox)} ${num(oy)} cm\n/Im${i} Do\nQ\n`;
+        `q\n${num(rw)} 0 0 ${num(rh)} ${num(ox)} ${num(oy)} cm\n/Im${i} Do\nQ\n`;
       emit(contentId, [
         latin1(`${contentId} 0 obj\n<< /Length ${content.length} >>\nstream\n`),
         latin1(content),

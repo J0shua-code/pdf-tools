@@ -69,7 +69,7 @@ const MODE_UI = {
     buttonText: 'Merge Files',
     dropText: 'Select PDFs & Images, or drag them here',
     status: 'Select at least two files (PDFs or Images) to merge.',
-    accept: 'application/pdf,image/png,image/jpeg,image/webp,image/gif,image/bmp',
+    accept: '.pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp',
     multiple: true
   },
   pdf2image: {
