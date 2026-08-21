@@ -1,10 +1,21 @@
-# Build artifacts
-/dist/*.js
-/dist/*.wasm
-/dist/*.worker.js
-/dist/*.map
-/build/
+# Build artifacts (runtime, do not commit to repo)
+/dist/
+/node_modules/
+
+# Cache / temp
 /cache/
+/tests/output/
+/tests/temp/
+/tests/*.log
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
 # Emscripten SDK (if installed locally)
 /emsdk/

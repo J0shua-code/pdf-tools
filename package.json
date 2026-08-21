@@ -40,8 +40,9 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "devDependencies": {},
-  "peerDependencies": {},
+  "devDependencies": {
+    "vite": "^8.2.2"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/J0shua-code/pdf-tools.git"
