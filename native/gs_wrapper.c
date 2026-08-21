@@ -210,6 +210,7 @@ static int run_gs(const char *input_paths[], int num_inputs,
         "-dNOPAUSE",
         "-dBATCH",
         "-dSAFER",
+        "-dQUIET",
         "-dNOINTERPOLATE",
         "-dNumRenderingThreads=1",
         NULL

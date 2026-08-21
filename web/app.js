@@ -889,7 +889,9 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js').then((reg) => {
       // Check for SW updates whenever app comes into focus
-      window.addEventListener('focus', () => reg.update());
+      window.addEventListener('focus', () => {
+        try { const p = reg.update(); if (p && p.catch) p.catch(() => {}); } catch {}
+      });
 
       function promptUpdate(waitingWorker) {
         const updateToast = document.getElementById('update-toast');
