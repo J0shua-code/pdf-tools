@@ -46,6 +46,17 @@
 
 importScripts('./ghostscript.js', './presets.js', './pdf-writer.js');
 
+// Suppress Ghostscript BoundingBox spam (%BoundingBox, %HiResBoundingBox, etc.)
+// that Emscripten forwards via put_char -> console. Filtered here for already-
+// built WASM (future builds also filter via native/pre.js + -dQUIET).
+if (typeof console !== 'undefined') {
+  const _origLog = console.log;
+  console.log = function (...args) {
+    if (args.length === 1 && typeof args[0] === 'string' && args[0].charAt(0) === '%') return;
+    return _origLog.apply(console, args);
+  };
+}
+
 const MODULE_PROMISE = GhostscriptModule();
 
 /*
