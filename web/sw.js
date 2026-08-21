@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pdf-tools-v1';
+const CACHE_NAME = 'pdf-tools-v3';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -11,9 +11,10 @@ const ASSETS_TO_CACHE = [
   './presets.js',
   './pdf-writer.js',
   './manifest.json',
-  './icon-192.png',
-  './icon-512.png',
-  './icon.svg'
+  './icon-192.png?v=3',
+  './icon-512.png?v=3',
+  './apple-touch-icon.png?v=3',
+  './icon.svg?v=3'
 ];
 
 self.addEventListener('install', (event) => {
