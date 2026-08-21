@@ -1,20 +1,21 @@
-const CACHE_NAME = 'pdf-tools-v3';
-const ASSETS_TO_CACHE = [
+ const CACHE_NAME = 'pdf-tools-__BUILD_ID__';
+ const V = '__BUILD_ID__';
+ const ASSETS_TO_CACHE = [
   './',
-  './index.html',
-  './style.css',
-  './app.js',
-  './gs-compress.js',
-  './ghostscript.worker.js',
-  './ghostscript.js',
-  './ghostscript.wasm',
-  './presets.js',
-  './pdf-writer.js',
-  './manifest.json',
-  './icon-192.png?v=3',
-  './icon-512.png?v=3',
-  './apple-touch-icon.png?v=3',
-  './icon.svg?v=3'
+  './index.html?v=${V}',
+  './style.css?v=${V}',
+  './app.js?v=${V}',
+  './gs-compress.js?v=${V}',
+  './ghostscript.worker.js?v=${V}',
+  './ghostscript.js?v=${V}',
+  './ghostscript.wasm?v=${V}',
+  './presets.js?v=${V}',
+  './pdf-writer.js?v=${V}',
+  './manifest.json?v=${V}',
+  './icon-192.png?v=${V}',
+  './icon-512.png?v=${V}',
+  './apple-touch-icon.png?v=${V}',
+  './icon.svg?v=${V}'
 ];
 
 self.addEventListener('message', (event) => {
