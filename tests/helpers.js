@@ -244,7 +244,7 @@ export async function splitPdfIndividual(module, inputBytes) {
     FS.mkdirTree(workDir);
     FS.writeFile(inPath, inputBytes);
     const run = module.cwrap('gs_run', 'number', ['string', 'string', 'string']);
-    const code = run(inPath, outPattern, '');
+    const code = run(inPath, outPattern, '-sDEVICE=pdfwrite');
     if (code !== 0) throw new Error(`gs_run split failed with code ${code}`);
     const pageFiles = FS.readdir(workDir)
       .filter((n) => /^page-\d+\.pdf$/.test(n))
@@ -273,7 +273,7 @@ export async function extractPdfPages(module, inputBytes, pages) {
     FS.writeFile(inPath, inputBytes);
     const run = module.cwrap('gs_run', 'number', ['string', 'string', 'string']);
     // Use -sPageList for Ghostscript (supports 1,3,5-7 etc.)
-    const code = run(inPath, outPath, `-sPageList=${pages}`);
+    const code = run(inPath, outPath, `-sDEVICE=pdfwrite\n-sPageList=${pages}`);
     if (code !== 0) throw new Error(`gs_run extract failed with code ${code}`);
     return FS.readFile(outPath);
   } finally {

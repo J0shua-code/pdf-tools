@@ -47,8 +47,19 @@
 importScripts('./ghostscript.js', './presets.js', './pdf-writer.js');
 
 // Suppress Ghostscript BoundingBox spam (%BoundingBox, %HiResBoundingBox, etc.)
-// that Emscripten forwards via put_char -> console. Filtered here for already-
-// built WASM (future builds also filter via native/pre.js + -dQUIET).
+// that Emscripten forwards via put_char -> Module.print/console. Filtered here
+// for already-built WASM (future builds also filter via native/pre.js + -dQUIET).
+if (typeof Module !== 'undefined') {
+  const _filter = (msg) => typeof msg === 'string' && msg.charAt(0) === '%';
+  if (typeof Module.print === 'function') {
+    const _origPrint = Module.print;
+    Module.print = function (msg) { if (_filter(msg)) return; return _origPrint(msg); };
+  }
+  if (typeof Module.printErr === 'function') {
+    const _origPrintErr = Module.printErr;
+    Module.printErr = function (msg) { if (_filter(msg)) return; return _origPrintErr(msg); };
+  }
+}
 if (typeof console !== 'undefined') {
   const _origLog = console.log;
   console.log = function (...args) {
@@ -666,7 +677,7 @@ async function splitPdf(module, file, options, id) {
     if (mode === 'individual') {
       postProgress(id, PROGRESS_STAGES.processing, 'Splitting into individual pages…');
       const outputPattern = `${workDir}/page-%d.pdf`;
-      const code = run(inputPath, outputPattern, '');
+      const code = run(inputPath, outputPattern, '-sDEVICE=pdfwrite');
       if (code !== 0) {
         const detail = getErrorDetail(module);
         const err = new Error(`Ghostscript exited with code ${code}.` + (detail ? ` ${detail.trim()}` : ''));
@@ -721,7 +732,7 @@ async function splitPdf(module, file, options, id) {
       const last = pages[pages.length - 1];
       const outPath = `${workDir}/output.pdf`;
       made.push(outPath);
-      const args = [`-dFirstPage=${first}`, `-dLastPage=${last}`].join('\n');
+      const args = ['-sDEVICE=pdfwrite', `-dFirstPage=${first}`, `-dLastPage=${last}`].join('\n');
       const code = run(inputPath, outPath, args);
       if (code !== 0) {
         const detail = getErrorDetail(module);
@@ -752,7 +763,7 @@ async function splitPdf(module, file, options, id) {
       const out = `${workDir}/tmp-${i}.pdf`;
       tmpPaths.push(out);
       made.push(out);
-      const args = [`-dFirstPage=${p}`, `-dLastPage=${p}`].join('\n');
+      const args = ['-sDEVICE=pdfwrite', `-dFirstPage=${p}`, `-dLastPage=${p}`].join('\n');
       const code = run(inputPath, out, args);
       if (code !== 0) {
         const detail = getErrorDetail(module);
